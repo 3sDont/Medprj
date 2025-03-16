@@ -5,6 +5,7 @@ import pickle
 import argparse
 import os
 import torch
+import re
 import numpy as np
 from tqdm import tqdm
 from torch import nn
@@ -322,7 +323,9 @@ if __name__ == '__main__':
         if train_loss < min_loss:
             print(f">> Loss Decreased ({min_loss:.6f} ---> {train_loss:.6f})")
             min_loss = train_loss
-            checkpoint_save_path = os.path.join(save_path, f"Epoch_{epoch:02d}_SupCL_{args.model_name}.pth")
+            safe_model_name = re.sub(r"[\/:*?\"<>|]", "_", args.model_name)  # Đổi '/' thành '_'
+            safe_model_name = re.sub(r"\.(\d+)", r"_\1", safe_model_name)  # Đổi dấu '.' trong phiên bản thành '_'
+            checkpoint_save_path = os.path.join(save_path, f"Epoch_{epoch:02d}_SupCL_{safe_model_name}.pth")
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
