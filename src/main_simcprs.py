@@ -45,6 +45,9 @@ def batch2device(batch, device):
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+# GPU accelerator
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
 """## Data loader"""
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, encodings, labels):
@@ -112,6 +115,96 @@ class Similarity(nn.Module):
 
 """## Model for downstream task"""
 
+
+class ModelForSE(nn.Module):
+    def __init__(self, model_name_or_path, pooler_type):
+        super(ModelForSE, self).__init__()
+        '''
+        Model for sentence embedding
+        '''
+        self.bert = AutoModel.from_pretrained(model_name_or_path)
+        self.pooler_type = pooler_type
+        self.pooler = Pooler(self.pooler_type)
+
+    def forward(self,
+                input_ids=None,
+                attention_mask=None,
+                token_type_ids=None,
+                position_ids=None,
+                head_mask=None,
+                inputs_embeds=None,
+                labels=None,
+                output_attentions=None,
+                output_hidden_states=None,
+                return_dict=None,
+                mlm_input_ids=None,
+                mlm_labels=None,
+                ):
+        outputs = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            output_attentions=output_attentions,
+            output_hidden_states=True if self.pooler_type in ['avg_top2', 'avg_first_last'] else False,
+            return_dict=return_dict,
+        )
+        if self.pooler_type in ["cls", "cls_before_pooler", "avg", "avg_top2", "avg_first_last"]:
+            pooler_output = self.pooler(attention_mask, outputs)
+
+        return BaseModelOutputWithPoolingAndCrossAttentions(
+            pooler_output=pooler_output,
+            last_hidden_state=outputs.last_hidden_state,
+            hidden_states=outputs.hidden_states,
+        )
+
+    def encode(self, sentences: Union[str, List[str]],
+               batch_size: int = 8,
+               show_progress_bar: bool = None,
+               convert_to_numpy: bool = True,
+               convert_to_tensor: bool = False,
+               device: str = None) -> Union[List[Tensor], ndarray, Tensor]:
+        self.eval()
+
+        if convert_to_tensor:
+            convert_to_numpy = False
+
+        input_was_string = False
+
+        if isinstance(sentences, str) or not hasattr(sentences,
+                                                     '__len__'):  # Cast an individual sentence to a list with length 1
+            sentences = [sentences]
+            input_was_string = True
+
+        if device is None:
+            device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+        self.to(device)
+
+        all_embeddings = []
+        for start_index in tqdm(range(0, len(sentences), batch_size), desc="Batches", disable=not show_progress_bar):
+            sentence_batch = sentences[start_index: start_index + batch_size]
+            features = tokenizer(sentence_batch,
+                                 padding='max_length',
+                                 truncation=True,
+                                 max_length=args.max_len,
+                                 return_tensors='pt').to(device)
+
+            with torch.no_grad():
+                out_features = self.forward(**features)
+                embeddings = []
+                # gather the embedding vectors
+                for row in out_features.pooler_output:
+                    embeddings.append(row.cpu())
+                all_embeddings.extend(embeddings)
+        if convert_to_tensor:
+            all_embeddings = torch.vstack(all_embeddings)
+        elif convert_to_numpy:
+            all_embeddings = np.asarray([emb.numpy() for emb in all_embeddings])
+
+        if input_was_string:
+            all_embeddings = all_embeddings[0]
+        return all_embeddings
 class Model_Classifier_WithAim(nn.Module):
     def __init__(self, base_model, num_classes):
         super(Model_Classifier_WithAim, self).__init__()
@@ -194,109 +287,7 @@ if __name__ == '__main__':
     parser.add_argument("--max_len", type=int, default=64, help="Max length")
     parser.add_argument("--use_aim", action="store_true", help="Whether to use aim embeddings")
     parser.add_argument("--saved_folder", type=str,default='SimCPRS', help="Whether to use aim embeddings")
-    parser.add_argument("--device", type=str,default='cuda', help="GPU acceleartor")
     args = parser.parse_args()
-
-    # GPU accelerator
-    # device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    device = args.device
-    class ModelForSE(nn.Module):
-        def __init__(self, model_name_or_path, pooler_type):
-            super(ModelForSE, self).__init__()
-            '''
-            Model for sentence embedding
-            '''
-            self.bert = AutoModel.from_pretrained(model_name_or_path)
-            self.pooler_type = pooler_type
-            self.pooler = Pooler(self.pooler_type)
-
-        def forward(self,
-                    input_ids=None,
-                    attention_mask=None,
-                    token_type_ids=None,
-                    position_ids=None,
-                    head_mask=None,
-                    inputs_embeds=None,
-                    labels=None,
-                    output_attentions=None,
-                    output_hidden_states=None,
-                    return_dict=None,
-                    mlm_input_ids=None,
-                    mlm_labels=None,
-                    ):
-            outputs = self.bert(
-                input_ids,
-                attention_mask=attention_mask,
-                head_mask=head_mask,
-                inputs_embeds=inputs_embeds,
-                output_attentions=output_attentions,
-                output_hidden_states=True if self.pooler_type in ['avg_top2', 'avg_first_last'] else False,
-                return_dict=return_dict,
-            )
-            if self.pooler_type in ["cls", "cls_before_pooler", "avg", "avg_top2", "avg_first_last"]:
-                pooler_output = self.pooler(attention_mask, outputs)
-
-            return BaseModelOutputWithPoolingAndCrossAttentions(
-                pooler_output=pooler_output,
-                last_hidden_state=outputs.last_hidden_state,
-                hidden_states=outputs.hidden_states,
-            )
-
-        def encode(self, sentences: Union[str, List[str]],
-                   batch_size: int = 8,
-                   show_progress_bar: bool = None,
-                   convert_to_numpy: bool = True,
-                   convert_to_tensor: bool = False,
-                   device: str = None) -> Union[List[Tensor], ndarray, Tensor]:
-            self.eval()
-
-            if convert_to_tensor:
-                convert_to_numpy = False
-
-            input_was_string = False
-
-            if isinstance(sentences, str) or not hasattr(sentences,
-                                                         '__len__'):  # Cast an individual sentence to a list with length 1
-                sentences = [sentences]
-                input_was_string = True
-
-            self.to(device)
-
-            all_embeddings = []
-            for start_index in tqdm(range(0, len(sentences), batch_size), desc="Batches",
-                                    disable=not show_progress_bar):
-                sentence_batch = sentences[start_index: start_index + batch_size]
-                features = tokenizer(sentence_batch,
-                                     padding='max_length',
-                                     truncation=True,
-                                     max_length=args.max_len,
-                                     return_tensors='pt').to(device)
-
-                with torch.no_grad():
-                    out_features = self.forward(**features)
-                    embeddings = []
-                    # gather the embedding vectors
-                    for row in out_features.pooler_output:
-                        embeddings.append(row.cpu())
-                    all_embeddings.extend(embeddings)
-            if convert_to_tensor:
-                all_embeddings = torch.vstack(all_embeddings)
-            elif convert_to_numpy:
-                all_embeddings = np.asarray([emb.numpy() for emb in all_embeddings])
-
-            if input_was_string:
-                all_embeddings = all_embeddings[0]
-            return all_embeddings
-
-    # Xác định thiết bị từ args
-    if args.device == "cuda" and torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif args.device == "mps" and torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")  # Mặc định là CPU nếu không khả dụng
-
-    print(f"Using device: {device}")
 
     if args.use_aim:
         features_name = args.features + 'S'
