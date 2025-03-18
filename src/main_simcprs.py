@@ -680,7 +680,7 @@ if __name__ == '__main__':
                     break  # break the training process early if no validation loss improvement
 
     # load checkpoint and testing
-    checkpoints = os.listdir(checkpoint_dir)
+    checkpoints = sorted([ckpt for ckpt in os.listdir(checkpoint_dir) if ckpt.startswith("Epoch")])
     checkpoint_name = checkpoints[-1]
     checkpoint = torch.load(checkpoint_dir + checkpoint_name, map_location=device,weights_only=False)  # ensure device for loading
 
