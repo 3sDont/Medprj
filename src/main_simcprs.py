@@ -442,7 +442,7 @@ if __name__ == '__main__':
 
     aims_embeddings = base_model.encode(X_aims, show_progress_bar=True, convert_to_tensor=True)
     if torch.cuda.is_available():
-        aims_embeddings = aims_embeddings.to(device)
+        aims_embeddings = aims_embeddings.cuda()
 
     # # Encode mà không chuyển thành tensor trực tiếp
     # aims_embeddings = base_model.encode(X_aims, show_progress_bar=True, convert_to_tensor=False)
