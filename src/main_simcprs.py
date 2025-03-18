@@ -682,7 +682,7 @@ if __name__ == '__main__':
     # load checkpoint and testing
     checkpoints = os.listdir(checkpoint_dir)
     checkpoint_name = checkpoints[-1]
-    checkpoint = torch.load(checkpoint_dir + checkpoint_name, map_location=device,weights_only=True)  # ensure device for loading
+    checkpoint = torch.load(checkpoint_dir + checkpoint_name, map_location=device,weights_only=False)  # ensure device for loading
 
     if args.use_aim:
          model = Model_Classifier_WithAim(base_model, n_classes)
