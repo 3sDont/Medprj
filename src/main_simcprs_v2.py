@@ -698,47 +698,151 @@ if __name__ == '__main__':
     # Loss function
     loss_fn = nn.NLLLoss().to(device)
 
-    # Test
+    # # Test
+    # topks = [1, 3, 5, 10]
+    # num_correct_at_k = {}
+    # test_loop = tqdm(test_loader, leave=True, desc='Testing...')  # removed format and added desc to tqdm
+    # num_correct_at_k["test"] = {k: 0 for k in topks}
+    # batch_test_accuracy = {k: [] for k in topks}
+    # history["test_acc@k"] = []
+    # history["test_loss"] = []
+    # test_loss = 0.0
+
+    # with torch.no_grad():
+    #     model.eval()
+    #     for features, labels in test_loop:
+    #         # Transfer Data to GPU if available
+    #         if torch.cuda.is_available():
+    #             features, labels = batch2device(features, device), labels.to(device)
+    #         if args.use_aim:  # If use_aim is True
+    #             logits = model(features, aims_embeddings)
+    #         else:  # If use_aim is False
+    #             logits = model(features)
+    #         # Find the Loss
+    #         loss = loss_fn(logits, labels)
+    #         # Calculate accuracy
+    #         probs_des = torch.argsort(torch.exp(logits), axis=1, descending=True)
+    #         for k in topks:
+    #             num_correct = 0
+    #             nPoints = len(labels)
+    #             for i in range(nPoints):
+    #                 if labels[i] in probs_des[i, 0:k]:
+    #                     num_correct += 1
+    #                     num_correct_at_k["test"][
+    #                         k] += 1  # globally counting number of correct at each k's for whole valid set
+    #             batch_test_accuracy[k] = num_correct / nPoints
+    #         # Calculate Loss
+    #         test_loss += loss.item()
+
+    #         test_loop.set_postfix(test_loss=loss.item(),
+    #                               test_top01=batch_test_accuracy[1],
+    #                               test_top03=batch_test_accuracy[3],
+    #                               test_top05=batch_test_accuracy[5],
+    #                               test_top10=batch_test_accuracy[10])
+
+    #     test_loss = test_loss / len(test_loader)
+    #     history["test_loss"].append(test_loss)
+    #     history["test_acc@k"].append(
+    #         {k: val / len(X_test) for k, val in num_correct_at_k["test"].items()}
+    #     )
+
+    # # Add test results to result.txt
+    # with open(result_file_path, "a") as f:
+    #     f.write(f"================================================\n")
+    #     f.write(f"Testing Loss: {history['test_loss'][-1]:.6f}\n")
+    #     f.write(f"Testing Acc@1: {history['test_acc@k'][-1][1]:.4f}\n")
+    #     f.write(f"Testing Acc@3: {history['test_acc@k'][-1][3]:.4f}\n")
+    #     f.write(f"Testing Acc@5: {history['test_acc@k'][-1][5]:.4f}\n")
+    #     f.write(f"Testing Acc@10: {history['test_acc@k'][-1][10]:.4f}\n")
+    #     f.write(f"================================================\n")
+
+    # ==========================================
+    # Test và Trích xuất thông tin chi tiết
+    # ==========================================
     topks = [1, 3, 5, 10]
-    num_correct_at_k = {}
-    test_loop = tqdm(test_loader, leave=True, desc='Testing...')  # removed format and added desc to tqdm
-    num_correct_at_k["test"] = {k: 0 for k in topks}
+    num_correct_at_k = {"test": {k: 0 for k in topks}}
     batch_test_accuracy = {k: [] for k in topks}
     history["test_acc@k"] = []
     history["test_loss"] = []
     test_loss = 0.0
 
+    # Khởi tạo list để lưu kết quả chi tiết xuất ra file
+    detailed_results = []
+    sample_global_idx = 0 # Biến đếm ID của bài báo trong tập test
+
+    test_loop = tqdm(test_loader, leave=True, desc='Testing and Extracting...')
+
     with torch.no_grad():
         model.eval()
         for features, labels in test_loop:
-            # Transfer Data to GPU if available
+            # 1. Chuyển dữ liệu lên GPU
             if torch.cuda.is_available():
                 features, labels = batch2device(features, device), labels.to(device)
-            if args.use_aim:  # If use_aim is True
+            
+            # 2. Forward pass để lấy dự đoán
+            if args.use_aim:
                 logits = model(features, aims_embeddings)
-            else:  # If use_aim is False
+            else:
                 logits = model(features)
-            # Find the Loss
+            
             loss = loss_fn(logits, labels)
-            # Calculate accuracy
-            probs_des = torch.argsort(torch.exp(logits), axis=1, descending=True)
+            test_loss += loss.item()
+
+            # 3. Tính probabilities (do model dùng LogSoftmax nên cần exp)
+            probs = torch.exp(logits)
+            
+            # Lấy top-10 dự đoán và index của chúng
+            K_max = 10
+            top_scores, top_indices = torch.topk(probs, k=K_max, dim=1)
+
+            # 4. Tính toán điểm tương đồng (Similarity) giữa Paper và Aims & Scope
+            # Lấy embedding gốc của bài báo
+            paper_outputs = base_model(**features)
+            paper_embs = paper_outputs.last_hidden_state[:, 0, :]  # Lấy CLS token
+            
+            # Ma trận Cosine Similarity giữa toàn bộ bài báo trong batch và toàn bộ Tạp chí
+            # Kích thước: [batch_size, n_classes]
+            sim_scores_matrix = sim_matrix(paper_embs, aims_embeddings)
+
+            # 5. Lưu trữ kết quả chi tiết cho từng bài báo trong batch
+            batch_size = labels.size(0)
+            for i in range(batch_size):
+                true_label = labels[i].item()
+
+                # Lặp qua Top-K dự đoán của bài báo này
+                for rank in range(K_max):
+                    pred_journal_id = top_indices[i, rank].item()
+                    base_score = top_scores[i, rank].item()
+                    base_rank = rank + 1
+                    
+                    # Lấy điểm similarity của journal được dự đoán
+                    aims_scope_sim = sim_scores_matrix[i, pred_journal_id].item()
+
+                    detailed_results.append({
+                        "Paper_ID": sample_global_idx,
+                        "True_Journal_ID": true_label,
+                        "Predicted_Journal_ID": pred_journal_id,
+                        "Base_Rank": base_rank,
+                        "Base_Score": base_score,
+                        "Aims_Scope_Sim": aims_scope_sim,
+                        "Is_Correct": 1 if pred_journal_id == true_label else 0
+                    })
+                sample_global_idx += 1
+
+            # 6. Tính Accuracy nội bộ để in ra màn hình (như code cũ)
+            probs_des = torch.argsort(probs, axis=1, descending=True)
             for k in topks:
                 num_correct = 0
                 nPoints = len(labels)
                 for i in range(nPoints):
                     if labels[i] in probs_des[i, 0:k]:
                         num_correct += 1
-                        num_correct_at_k["test"][
-                            k] += 1  # globally counting number of correct at each k's for whole valid set
+                        num_correct_at_k["test"][k] += 1
                 batch_test_accuracy[k] = num_correct / nPoints
-            # Calculate Loss
-            test_loss += loss.item()
 
             test_loop.set_postfix(test_loss=loss.item(),
                                   test_top01=batch_test_accuracy[1],
-                                  test_top03=batch_test_accuracy[3],
-                                  test_top05=batch_test_accuracy[5],
-                                  test_top10=batch_test_accuracy[10])
+                                  test_top05=batch_test_accuracy[5])
 
         test_loss = test_loss / len(test_loader)
         history["test_loss"].append(test_loss)
@@ -746,7 +850,10 @@ if __name__ == '__main__':
             {k: val / len(X_test) for k, val in num_correct_at_k["test"].items()}
         )
 
-    # Add test results to result.txt
+    # ==========================================
+    # Ghi kết quả ra file
+    # ==========================================
+    # 1. Ghi kết quả tổng quan ra results.txt
     with open(result_file_path, "a") as f:
         f.write(f"================================================\n")
         f.write(f"Testing Loss: {history['test_loss'][-1]:.6f}\n")
@@ -755,3 +862,9 @@ if __name__ == '__main__':
         f.write(f"Testing Acc@5: {history['test_acc@k'][-1][5]:.4f}\n")
         f.write(f"Testing Acc@10: {history['test_acc@k'][-1][10]:.4f}\n")
         f.write(f"================================================\n")
+
+    # 2. Xuất file CSV chi tiết chứa Base Score, Rank và Aims Scope Sim
+    df_details = pd.DataFrame(detailed_results)
+    detailed_csv_path = os.path.join(checkpoint_dir, f"test_detailed_predictions.csv")
+    df_details.to_csv(detailed_csv_path, index=False)
+    print(f"\n✅ Đã lưu file kết quả dự đoán chi tiết tại: {detailed_csv_path}")
