@@ -252,14 +252,15 @@ class WithAim_Classifier(nn.Module):
         self.linear_main_1 = nn.Linear(512 + num_classes, num_classes)
         self.act_main_1 = nn.LogSoftmax(dim=1)
 
-    def forward(self, inputs_tak, inputs_aims):
+    def forward(self, inputs_tak, inputs_aims, return_aux=False):
         '''
         Args:
             inputs_tak: (Dict) batch of TAK samples, shape as [bs, n_samples, encoding_dim]
             inputs_aims: (Tensor) batch of aims embeddings taken by cls tokens, shape as [bs, n_samples, hidden_size]
         '''
         output_tak = self.base_model(**inputs_tak)
-        last_hidden = output_tak.last_hidden_state[:, 0, :]  # cls tokens
+        paper_cls = output_tak.last_hidden_state[:, 0, :]  # cls tokens
+        last_hidden = paper_cls
         x = self.linear1_1(last_hidden)
         x = self.act1_1(x)
         x = self.drop1_1(x)
@@ -274,8 +275,12 @@ class WithAim_Classifier(nn.Module):
             out = self.linear_main_1(concat_feats)
             out = self.act_main_1(out)
 
+            if return_aux:
+                return out, paper_cls
             return out
         else:
+            if return_aux:
+                return x, paper_cls
             return x
 
 
@@ -291,6 +296,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_epoch", type=int, default=10, help="number of epochs")
     parser.add_argument("--name", type=str, default=10, help="model name when save checkpoint")
     parser.add_argument("--folder", type=str, default=10, help="folder")
+    parser.add_argument("--export_top_k", type=int, default=10, help="number of top-k candidates to export")
     args = parser.parse_args()
 
     # Run the main part of the script
@@ -429,6 +435,41 @@ if __name__ == '__main__':
     min_valid_loss = np.inf
     patience = 3  # Early stopping patience
     trigger_times = 0
+
+    def export_topk_candidates(model, loader, split_name, aims_embedding_matrix, top_k):
+        rows = []
+        model.eval()
+
+        with torch.no_grad():
+            sample_offset = 0
+            for batch_features, batch_labels in tqdm(loader, leave=False, desc=f"Exporting {split_name} top-{top_k}"):
+                if torch.cuda.is_available():
+                    batch_features, batch_labels = batch2device(batch_features, device), batch_labels.to(device)
+
+                logits, paper_cls = model(batch_features, aims_embedding_matrix, return_aux=True)
+                probs = torch.exp(logits)
+                sorted_indices = torch.argsort(probs, dim=1, descending=True)
+                aims_scope_similarity = sim_matrix(paper_cls, aims_embedding_matrix)
+
+                batch_size_actual = batch_labels.size(0)
+                for i in range(batch_size_actual):
+                    true_label = int(batch_labels[i].item())
+                    top_candidates = sorted_indices[i, :top_k].tolist()
+
+                    for rank_position, journal_idx in enumerate(top_candidates, start=1):
+                        rows.append({
+                            "split": split_name,
+                            "sample_index": sample_offset + i,
+                            "true_label": true_label,
+                            "journal_index": int(journal_idx),
+                            "base_rank": rank_position,
+                            "base_score": float(probs[i, journal_idx].item()),
+                            "aims_scope_similarity": float(aims_scope_similarity[i, journal_idx].item()),
+                        })
+
+                sample_offset += batch_size_actual
+
+        return pd.DataFrame(rows)
 
     def get_latest_checkpoint(checkpoint_dir):
         checkpoints = [f for f in os.listdir(checkpoint_dir) if f.endswith(".pth")]
@@ -636,6 +677,34 @@ if __name__ == '__main__':
     model.to(device)
 
     history = checkpoint['history']
+
+    export_train_loader = torch.utils.data.DataLoader(train_dataset,
+                                                      batch_size=args.batch_size,
+                                                      shuffle=False)
+    export_valid_loader = torch.utils.data.DataLoader(valid_dataset,
+                                                      batch_size=args.batch_size,
+                                                      shuffle=False)
+    export_test_loader = torch.utils.data.DataLoader(test_dataset,
+                                                     batch_size=args.batch_size,
+                                                     shuffle=False)
+
+    export_dir = os.path.join(checkpoint_dir, f"exports_top{args.export_top_k}")
+    os.makedirs(export_dir, exist_ok=True)
+
+    train_export_df = export_topk_candidates(model, export_train_loader, "train", aims_embeddings, args.export_top_k)
+    valid_export_df = export_topk_candidates(model, export_valid_loader, "val", aims_embeddings, args.export_top_k)
+    test_export_df = export_topk_candidates(model, export_test_loader, "test", aims_embeddings, args.export_top_k)
+
+    combined_export_df = pd.concat([train_export_df, valid_export_df, test_export_df], ignore_index=True)
+    combined_export_df[["split", "sample_index", "true_label", "journal_index", "base_rank", "base_score"]].to_csv(
+        os.path.join(export_dir, "base_score.csv"), index=False
+    )
+    combined_export_df[["split", "sample_index", "true_label", "journal_index", "base_rank"]].to_csv(
+        os.path.join(export_dir, "base_rank.csv"), index=False
+    )
+    combined_export_df[["split", "sample_index", "true_label", "journal_index", "aims_scope_similarity"]].to_csv(
+        os.path.join(export_dir, "aims_scope_similarity.csv"), index=False
+    )
 
     # Loss function
     loss_fn = nn.NLLLoss().to(device)
