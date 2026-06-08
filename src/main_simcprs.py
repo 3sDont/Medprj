@@ -219,7 +219,7 @@ class Model_Classifier_WithAim(nn.Module):
         self.linear_main_1 = nn.Linear(512 + num_classes, num_classes)
         self.act_main_1 = nn.LogSoftmax(dim=1)
 
-    def forward(self, inputs_tak, inputs_aims):
+    def forward(self, inputs_tak, inputs_aims, return_aux=False):
         '''
         Args:
             inputs_tak: (Dict) batch of TAK samples, shape as [bs, n_samples, encoding_dim]
@@ -241,8 +241,12 @@ class Model_Classifier_WithAim(nn.Module):
             out = self.linear_main_1(concat_feats)
             out = self.act_main_1(out)
 
+            if return_aux:
+                return out, cosine_feats
             return out
         else:
+            if return_aux:
+                return x, None
             return x
 
 class Model_Classifier_NoAim(nn.Module):
@@ -450,6 +454,47 @@ if __name__ == '__main__':
 
     # Loss function
     loss_fn = nn.NLLLoss().to(device)
+
+    def export_split_metrics(model, loader, split_name, output_dir, export_aims_embeddings):
+        rows = []
+        model.eval()
+
+        with torch.no_grad():
+            sample_offset = 0
+            for batch_features, batch_labels in tqdm(loader, leave=False, desc=f"Exporting {split_name}"):
+                if torch.cuda.is_available():
+                    batch_features, batch_labels = batch2device(batch_features, device), batch_labels.to(device)
+
+                if args.use_aim:
+                    logits, cosine_feats = model(batch_features, export_aims_embeddings, return_aux=True)
+                else:
+                    logits = model(batch_features)
+                    cosine_feats = None
+
+                probs = torch.exp(logits)
+                sorted_indices = torch.argsort(probs, dim=1, descending=True)
+
+                batch_size_actual = batch_labels.size(0)
+                for i in range(batch_size_actual):
+                    true_label = int(batch_labels[i].item())
+                    base_score = float(probs[i, true_label].item())
+                    rank_positions = (sorted_indices[i] == true_label).nonzero(as_tuple=False)
+                    base_rank = int(rank_positions.item()) + 1 if rank_positions.numel() > 0 else None
+                    aims_scope_similarity = float(cosine_feats[i, true_label].item()) if cosine_feats is not None else np.nan
+
+                    rows.append({
+                        "split": split_name,
+                        "sample_index": sample_offset + i,
+                        "true_label": true_label,
+                        "base_score": base_score,
+                        "base_rank": base_rank,
+                        "aims_scope_similarity": aims_scope_similarity,
+                    })
+
+                sample_offset += batch_size_actual
+
+        os.makedirs(output_dir, exist_ok=True)
+        return pd.DataFrame(rows)
 
     """## Training settings"""
 
@@ -743,6 +788,32 @@ if __name__ == '__main__':
         history["test_acc@k"].append(
             {k: val / len(X_test) for k, val in num_correct_at_k["test"].items()}
         )
+
+    export_dir = os.path.join(checkpoint_dir, "exports")
+    export_train_loader = torch.utils.data.DataLoader(train_dataset,
+                                                      batch_size=args.batch_size,
+                                                      shuffle=False)
+    export_valid_loader = torch.utils.data.DataLoader(valid_dataset,
+                                                      batch_size=args.batch_size,
+                                                      shuffle=False)
+    export_test_loader = torch.utils.data.DataLoader(test_dataset,
+                                                     batch_size=args.batch_size,
+                                                     shuffle=False)
+
+    train_export_df = export_split_metrics(model, export_train_loader, "train", export_dir, aims_embeddings)
+    valid_export_df = export_split_metrics(model, export_valid_loader, "val", export_dir, aims_embeddings)
+    test_export_df = export_split_metrics(model, export_test_loader, "test", export_dir, aims_embeddings)
+
+    combined_export_df = pd.concat([train_export_df, valid_export_df, test_export_df], ignore_index=True)
+    combined_export_df[["split", "sample_index", "true_label", "base_score"]].to_csv(
+        os.path.join(export_dir, "base_score.csv"), index=False
+    )
+    combined_export_df[["split", "sample_index", "true_label", "base_rank"]].to_csv(
+        os.path.join(export_dir, "base_rank.csv"), index=False
+    )
+    combined_export_df[["split", "sample_index", "true_label", "aims_scope_similarity"]].to_csv(
+        os.path.join(export_dir, "aims_scope_similarity.csv"), index=False
+    )
 
     # Add test results to result.txt
     with open(result_file_path, "a") as f:
