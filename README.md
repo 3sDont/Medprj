@@ -30,5 +30,8 @@
 Use --checkpoint_path if you want to load a fine-tuned model trained with contrastive learning; otherwise, skip this option.
 Use --use_aim if you want to train the model using the journal's Aim; otherwise, skip this option.
 
-
+# 3. How to evaluate with mrr, ndcg@k
+```
+!python compute_metrics.py --input_csv test_detailed_predictions.csv --ks 1 3 5 10
+```
 
