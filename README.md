@@ -35,3 +35,41 @@ Use --use_aim if you want to train the model using the journal's Aim; otherwise,
 !python compute_metrics.py --input_csv test_detailed_predictions.csv --ks 1 3 5 10
 ```
 
+# 4. How to inference 
+Run full
+```
+python inference.py `
+  --checkpoint_path "đường_dẫn_tới_file.pth" `
+  --model_name "roberta-base" `
+  --data_path "data/preprocessed_data/" `
+  --aims_csv "01_aims.csv" `
+  --input_csv "data/preprocessed_data/01_test.csv" `
+  --features TAK `
+  --use_aim `
+  --max_len 64 `
+  --topk 10 `
+  --output_csv "pred_all.csv"
+
+```
+
+
+```
+# Account 1
+python inference.py `
+  --checkpoint_path "file.pth" --model_name "roberta-base" `
+  --data_path "data/preprocessed_data/" --aims_csv "01_aims.csv" `
+  --input_csv "data/preprocessed_data/01_test.csv" `
+  --start_idx 0 --end_idx 100000 `
+  --features TAK --use_aim --topk 10 `
+  --output_csv "pred_0_100k.csv"
+
+# Account 2
+python inference.py `
+  ... --start_idx 100000 --end_idx 200000 --output_csv "pred_100k_200k.csv"
+
+# Account 3
+python inference.py `
+  ... --start_idx 200000 --output_csv "pred_200k_end.csv"
+```
+
+
