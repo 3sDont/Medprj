@@ -72,4 +72,38 @@ python inference.py `
   ... --start_idx 200000 --output_csv "pred_200k_end.csv"
 ```
 
+# 5. Run learning to rank
+Training:
 
+```
+# Bước 1: Tạo predictions cho từng split bằng inference.py
+python inference.py --input_csv data/preprocessed_data/01_train.csv    --output_csv pred_train.csv ...
+python inference.py --input_csv data/preprocessed_data/01_validate.csv --output_csv pred_val.csv   ...
+python inference.py --input_csv data/preprocessed_data/01_test.csv     --output_csv pred_test.csv  ...
+
+# Bước 2: Train L2R
+python train_l2r.py \
+    --train_csv pred_train.csv \
+    --val_csv   pred_val.csv   \
+    --test_csv  pred_test.csv  \
+    --output_dir l2r_output
+```
+
+
+Ouput:
+```
+l2r_output/
+├── l2r_lightgbm_model.pkl      ← model đã train (dùng lại ở mode predict)
+├── val_l2r_predictions.csv     ← val set đã re-rank + L2R_Score, L2R_Rank
+├── val_l2r_metrics.txt         ← MRR, NDCG@k, Acc@k trên val
+├── test_l2r_predictions.csv
+└── test_l2r_metrics.txt        ← kết quả cuối cùng
+```
+Predict:
+```
+python train_l2r.py \
+    --mode predict \
+    --test_csv  pred_new_papers.csv \
+    --model_path l2r_output/l2r_lightgbm_model.pkl \
+    --output_dir l2r_output
+```
