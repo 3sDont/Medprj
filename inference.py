@@ -67,7 +67,7 @@ class ModelForSE(nn.Module):
 
     def encode(self, sentences: Union[str, List[str]], batch_size=8,
                show_progress_bar=None, convert_to_numpy=True,
-               convert_to_tensor=False, device=None, tokenizer=None, max_len=64):
+               convert_to_tensor=False, device=None, tokenizer=None, max_len=512):
         self.eval()
         if convert_to_tensor:
             convert_to_numpy = False
@@ -152,7 +152,7 @@ def load_model(checkpoint_path, model_name, pooler_type, n_classes, use_aim, dev
 
 
 def predict(texts: List[str], model, tokenizer, aims_embeddings, device,
-            max_len=64, batch_size=32, topk=10, use_aim=True):
+            max_len=512, batch_size=32, topk=10, use_aim=True):
     """
     Args:
         texts: list of input strings (e.g. title + abstract + keywords)
@@ -217,7 +217,7 @@ if __name__ == '__main__':
                         help="Feature combination: TAK | TA | TK | AK | T | A | K")
     parser.add_argument("--use_aim", action="store_true")
     parser.add_argument("--use_category", action="store_true")
-    parser.add_argument("--max_len", type=int, default=64)
+    parser.add_argument("--max_len", type=int, default=512)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--topk", type=int, default=10)
     parser.add_argument("--output_csv", type=str, default="predictions.csv")

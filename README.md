@@ -76,17 +76,39 @@ python inference.py `
 Training:
 
 ```
+
+
+
 # Bước 1: Tạo predictions cho từng split bằng inference.py
 python inference.py --input_csv data/preprocessed_data/01_train.csv    --output_csv pred_train.csv ...
 python inference.py --input_csv data/preprocessed_data/01_validate.csv --output_csv pred_val.csv   ...
 python inference.py --input_csv data/preprocessed_data/01_test.csv     --output_csv pred_test.csv  ...
 
-# Bước 2: Train L2R
+# Bước 2: Tính aims_Scope_Sim
+python aims_Scope_Sim.py \
+  --predictions_csv predictions.csv \
+  --input_csv data/test_set.csv \
+  --checkpoint_path checkpoints/best_model.pth \
+  --model_name roberta-base \
+  --data_path data/ \
+  --features TAK \
+  --output_csv predictions_with_sim.csv
+
+
+
+# Bước 3: Train L2R
+# Training mode — needs separate predictions for each split
 python train_l2r.py \
-    --train_csv pred_train.csv \
-    --val_csv   pred_val.csv   \
-    --test_csv  pred_test.csv  \
+    --train_csv predictions_train.csv \
+    --val_csv   predictions_val.csv   \
+    --test_csv  predictions_test.csv  \
+    --model_type lightgbm \
     --output_dir l2r_output
+
+# When LLM features are ready, just add:
+    --domain_sim_csv      domain_sim.csv \
+    --research_focus_sim_csv research_focus_sim.csv
+
 ```
 
 
@@ -106,4 +128,20 @@ python train_l2r.py \
     --test_csv  pred_new_papers.csv \
     --model_path l2r_output/l2r_lightgbm_model.pkl \
     --output_dir l2r_output
+```
+
+
+Flow:
+```
+inference.py          aims_Scope_Sim.py         train_l2r.py
+─────────────         ─────────────────         ────────────
+predictions.csv  ──►  predictions.csv      ──►  L2R model
+(thiếu cột)           (có Aims_Scope_Sim)       (dùng đủ 5 features)
+
+
+train.csv ──► inference.py ──► pred_train.csv ─┐
+validate.csv ► inference.py ──► pred_val.csv   ─┼─► train_l2r.py (mode train) ──► model.pkl
+test.csv ────► inference.py ──► pred_test.csv  ─┘
+
+papers_new.csv ──► inference.py ──► pred_mới.csv ──► train_l2r.py (mode predict) ──► re-ranked
 ```
