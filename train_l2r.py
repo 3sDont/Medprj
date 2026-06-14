@@ -229,12 +229,17 @@ def _dcg_at_k(sorted_relevances: np.ndarray, k: int) -> float:
     return float(gains.sum())
 
 
-def evaluate(df: pd.DataFrame, score_col: str, ks=(1, 3, 5, 10)):
+def evaluate(df: pd.DataFrame, score_col: str, ks=(1, 3, 5, 10), candidate_pool: int | None = None):
     """
-    Rank candidates by score_col within each paper, then compute MRR and NDCG@k.
+    Re-rank all candidates per paper by score_col, then evaluate at top-k.
 
+    candidate_pool: if set, only use the top-N candidates by Base_Rank before re-ranking
+                    (e.g. candidate_pool=20 means re-rank top-20, evaluate Acc@10)
     Returns (metrics_dict, df_with_l2r_rank)
     """
+    if candidate_pool is not None:
+        df = df[df["Base_Rank"] <= candidate_pool].copy()
+
     df = df.copy()
     df["L2R_Rank"] = (
         df.groupby("Paper_ID")[score_col]
@@ -329,6 +334,10 @@ def build_argparser():
                    help="Directory for saved model, predictions, and metrics")
     p.add_argument("--ks", type=int, nargs="+", default=[1, 3, 5, 10],
                    help="k values for Acc@k and NDCG@k")
+    p.add_argument("--candidates", type=int, default=20,
+                   help="Number of base model candidates to re-rank (e.g. 20). "
+                        "Metrics (Acc@10) are computed after re-ranking this pool. "
+                        "Journals at rank 11-20 can be pulled into top-10 by L2R.")
 
     return p
 

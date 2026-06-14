@@ -139,7 +139,7 @@ predictions.csv  ──►  predictions.csv      ──►  L2R model
 (thiếu cột)           (có Aims_Scope_Sim)       (dùng đủ 5 features)
 
 
-train.csv ──► inference.py ──► pred_train.csv ─┐
+train.csv ──► inference.py ──► pred_train.csv  ─┐
 validate.csv ► inference.py ──► pred_val.csv   ─┼─► train_l2r.py (mode train) ──► model.pkl
 test.csv ────► inference.py ──► pred_test.csv  ─┘
 

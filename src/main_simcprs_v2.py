@@ -791,8 +791,8 @@ if __name__ == '__main__':
             # 3. Tính probabilities (do model dùng LogSoftmax nên cần exp)
             probs = torch.exp(logits)
             
-            # Lấy top-10 dự đoán và index của chúng
-            K_max = 10
+            # Lấy top-20 candidates để L2R có thể kéo journal đúng từ rank 11-20 vào top-10
+            K_max = 20
             top_scores, top_indices = torch.topk(probs, k=K_max, dim=1)
 
             # 4. Tính toán điểm tương đồng (Similarity) giữa Paper và Aims & Scope

@@ -72,8 +72,8 @@ if __name__ == '__main__':
     # Encoding
     parser.add_argument("--features", type=str, default="TAK",
                         help="Feature combination: TAK | TA | TK | AK | T | A | K")
-    parser.add_argument("--max_len", type=int, default=64)
-    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--max_len", type=int, default=512)
+    parser.add_argument("--batch_size", type=int, default=16)
     # Output
     parser.add_argument("--output_csv", type=str, default=None,
                         help="Đường dẫn output. Mặc định: ghi đè lên predictions_csv.")

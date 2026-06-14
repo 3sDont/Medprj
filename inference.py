@@ -219,7 +219,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_category", action="store_true")
     parser.add_argument("--max_len", type=int, default=512)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--topk", type=int, default=10)
+    parser.add_argument("--topk", type=int, default=20)
     parser.add_argument("--output_csv", type=str, default="predictions.csv")
     args = parser.parse_args()
 
