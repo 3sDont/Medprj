@@ -25,6 +25,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import argparse
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 
 from inference import build_text
@@ -41,7 +42,7 @@ if __name__ == '__main__':
     parser.add_argument("--input_csv", type=str, required=True,
                         help="CSV gốc của bài báo (cột: Title, Abstract, Keywords)")
     # Encoder
-    parser.add_argument("--encoder_model", type=str, default="allenai/specter2_proximity",
+    parser.add_argument("--encoder_model", type=str, default="allenai/specter2_base",
                         help="SentenceTransformer model để encode papers và aims")
     parser.add_argument("--batch_size", type=int, default=64,
                         help="Batch size khi encode (SPECTER2 nhẹ hơn BioBERT nhiều)")
