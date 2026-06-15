@@ -114,16 +114,21 @@ if __name__ == '__main__':
 
     paper_id_to_idx = {pid: i for i, pid in enumerate(unique_paper_ids)}
 
-    # ── Tính cosine sim (vectorized) ───────────────────────────────────────────
+    # ── Tính cosine sim theo chunk (tránh OOM với dataset lớn) ────────────────
     # Vì đã normalize L2 → cosine_sim(u, v) = dot(u, v)
     print("Computing Aims_Scope_Sim...")
-    paper_indices   = [paper_id_to_idx[pid] for pid in pred_df["Paper_ID"]]
-    journal_indices = pred_df["Predicted_Journal_ID"].values.astype(int)
+    paper_indices_arr   = np.array([paper_id_to_idx[pid] for pid in pred_df["Paper_ID"]], dtype=np.int32)
+    journal_indices_arr = pred_df["Predicted_Journal_ID"].values.astype(np.int32)
 
-    p_embs = paper_embs[paper_indices]   # [n_rows, hidden_size]
-    j_embs = aims_embs[journal_indices]  # [n_rows, hidden_size]
+    chunk_size = 200_000  # ~0.6 GB/chunk với hidden_size=768
+    n_rows = len(pred_df)
+    sims = np.empty(n_rows, dtype=np.float32)
 
-    sims = (p_embs * j_embs).sum(axis=1).astype(np.float32)  # [n_rows]
+    for start in tqdm(range(0, n_rows, chunk_size), desc="Computing sims"):
+        end = min(start + chunk_size, n_rows)
+        p_chunk = paper_embs[paper_indices_arr[start:end]]    # [chunk, hidden]
+        j_chunk = aims_embs[journal_indices_arr[start:end]]   # [chunk, hidden]
+        sims[start:end] = (p_chunk * j_chunk).sum(axis=1)
 
     pred_df["Aims_Scope_Sim"] = sims.round(6)
 
