@@ -1,0 +1,7 @@
+data/
+.venv/
+__pycache__/
+*.pyc
+.env
+l2r_output/
+l2r_output_5feat/

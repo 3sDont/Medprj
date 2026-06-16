@@ -25,8 +25,8 @@ From inference.py (predictions.csv):
     (Aims_Scope_Sim column optional — zero-filled if absent)
 
 Optional supplementary CSVs (added later):
-    domain_similarity CSV      → Paper_ID, Predicted_Journal_ID, domain_similarity
-    research_focus_sim CSV     → Paper_ID, Predicted_Journal_ID, research_focus_similarity
+    domain_similarity CSV      ->Paper_ID, Predicted_Journal_ID, domain_similarity
+    research_focus_sim CSV     ->Paper_ID, Predicted_Journal_ID, research_focus_similarity
 
 Usage examples
 --------------
@@ -111,6 +111,10 @@ def merge_optional_feature(df: pd.DataFrame,
                             feature_col: str,
                             default: float = 0.0) -> pd.DataFrame:
     """Left-join an optional per-(paper, journal) similarity CSV into df."""
+    if feature_col in df.columns:
+        df[feature_col] = df[feature_col].fillna(default)
+        print(f"  '{feature_col}' already present in CSV (kept as-is)")
+        return df
     if feature_csv and os.path.exists(feature_csv):
         feat_df = pd.read_csv(feature_csv, usecols=["Paper_ID", "Predicted_Journal_ID", feature_col])
         df = df.merge(feat_df, on=["Paper_ID", "Predicted_Journal_ID"], how="left")
@@ -119,9 +123,9 @@ def merge_optional_feature(df: pd.DataFrame,
     else:
         df[feature_col] = default
         if feature_csv:
-            print(f"  WARNING: '{feature_csv}' not found — '{feature_col}' set to {default}")
+            print(f"  WARNING: '{feature_csv}' not found - '{feature_col}' set to {default}")
         else:
-            print(f"  '{feature_col}' not provided — set to {default}")
+            print(f"  '{feature_col}' not provided - set to {default}")
     return df
 
 
@@ -344,9 +348,9 @@ def _load_and_enrich(csv_path: str, args) -> pd.DataFrame:
 
 
 def _print_metrics(split_name: str, metrics: dict):
-    print(f"\n{'─'*40}")
+    print(f"\n{'-'*40}")
     print(f"  {split_name.upper()} METRICS")
-    print(f"{'─'*40}")
+    print(f"{'-'*40}")
     for name, val in metrics.items():
         print(f"  {name:<15} {val:.4f}")
 
@@ -365,7 +369,7 @@ def run_train(args):
     os.makedirs(args.output_dir, exist_ok=True)
 
     # ── load ──────────────────────────────────────────────────────────────────
-    print("\n[1/4] Loading data …")
+    print("\n[1/4] Loading data ...")
     print(f"  train: {args.train_csv}")
     df_train = _load_and_enrich(args.train_csv, args)
     print(f"  val  : {args.val_csv}")
@@ -377,8 +381,8 @@ def run_train(args):
     X_val,   y_val,   groups_val   = build_dataset(df_val)
     X_test,  y_test,  groups_test  = build_dataset(df_test)
 
-    print(f"\n  Papers  — train: {len(groups_train)}, val: {len(groups_val)}, test: {len(groups_test)}")
-    print(f"  Samples — train: {len(X_train)},  val: {len(X_val)},  test: {len(X_test)}")
+    print(f"\n  Papers  - train: {len(groups_train)}, val: {len(groups_val)}, test: {len(groups_test)}")
+    print(f"  Samples - train: {len(X_train)},  val: {len(X_val)},  test: {len(X_test)}")
     print(f"  Features: {FEATURE_COLS}")
     active = [c for c in FEATURE_COLS
               if not (c in ("domain_sim", "research_focus_sim")
@@ -389,13 +393,13 @@ def run_train(args):
         print(f"  (zero-filled / inactive): {inactive}")
 
     # ── baseline (before L2R) ─────────────────────────────────────────────────
-    print("\n[2/4] Baseline evaluation (base model ranking) …")
+    print("\n[2/4] Baseline evaluation (base model ranking) ...")
     for split_name, df_split in [("val", df_val), ("test", df_test)]:
         metrics, _ = evaluate(df_split, score_col="Base_Score", ks=args.ks)
         _print_metrics(f"Baseline {split_name}", metrics)
 
     # ── train ─────────────────────────────────────────────────────────────────
-    print(f"\n[3/4] Training {args.model_type} ranker …")
+    print(f"\n[3/4] Training {args.model_type} ranker ...")
     if args.model_type == "lightgbm":
         model = train_lightgbm(X_train, y_train, groups_train,
                                X_val,   y_val,   groups_val,   args)
@@ -405,7 +409,7 @@ def run_train(args):
 
     model_path = os.path.join(args.output_dir, f"l2r_{args.model_type}_model.pkl")
     joblib.dump(model, model_path)
-    print(f"\n  Model saved → {model_path}")
+    print(f"\n  Model saved ->{model_path}")
 
     # feature importance (LightGBM only)
     if args.model_type == "lightgbm":
@@ -415,7 +419,7 @@ def run_train(args):
             print(f"    {feat:<25} {score:.2f}")
 
     # ── evaluate ──────────────────────────────────────────────────────────────
-    print("\n[4/4] Evaluating L2R model …")
+    print("\n[4/4] Evaluating L2R model ...")
     for split_name, df_split, X_split in [
         ("val",  df_val,  X_val),
         ("test", df_test, X_test),
@@ -432,8 +436,8 @@ def run_train(args):
 
         out_txt = os.path.join(args.output_dir, f"{split_name}_l2r_metrics.txt")
         _save_metrics(metrics, out_txt, f"L2R {split_name}")
-        print(f"  Saved → {out_csv}")
-        print(f"  Saved → {out_txt}")
+        print(f"  Saved ->{out_csv}")
+        print(f"  Saved ->{out_txt}")
 
     print("\nDone.")
 
@@ -444,11 +448,11 @@ def run_predict(args):
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    print(f"\nLoading model from {args.model_path} …")
+    print(f"\nLoading model from {args.model_path} ...")
     model = joblib.load(args.model_path)
     model_type = "lightgbm" if "lightgbm" in os.path.basename(args.model_path) else "xgboost"
 
-    print(f"Loading predictions from {args.test_csv} …")
+    print(f"Loading predictions from {args.test_csv} ...")
     df = _load_and_enrich(args.test_csv, args)
     X, y, groups = build_dataset(df)
 
@@ -460,11 +464,11 @@ def run_predict(args):
 
     out_csv = os.path.join(args.output_dir, "predict_l2r_predictions.csv")
     df_ranked.to_csv(out_csv, index=False)
-    print(f"\nRanked predictions saved → {out_csv}")
+    print(f"\nRanked predictions saved ->{out_csv}")
 
     out_txt = os.path.join(args.output_dir, "predict_l2r_metrics.txt")
     _save_metrics(metrics, out_txt, "Predict")
-    print(f"Metrics saved → {out_txt}")
+    print(f"Metrics saved ->{out_txt}")
 
 
 def main():
