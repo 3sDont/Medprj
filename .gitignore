@@ -5,3 +5,4 @@ __pycache__/
 .env
 l2r_output/
 l2r_output_5feat/
+l2r_output_hard/
