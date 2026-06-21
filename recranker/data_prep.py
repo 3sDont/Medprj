@@ -29,13 +29,13 @@ import pandas as pd
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths
 # ─────────────────────────────────────────────────────────────────────────────
-TRAIN_SET_CSV       = "data/train_set.csv"
-JOURNAL_INFO_CSV    = "data/journal_full_info.csv"
-JOURNAL_JSONL       = "data/extracted_journals/extracted.jsonl"
-HARD_TRAIN_CSV      = "data/subset_hard/train.csv"
-HARD_VAL_CSV        = "data/subset_hard/val.csv"
-HARD_TEST_CSV       = "data/subset_hard/test.csv"
-OUT_DIR             = "data/recranker_data"
+TRAIN_SET_CSV       = "data\\preprocessed_data\\train_set.csv"
+JOURNAL_INFO_CSV    = "data\\preprocessed_data\\journal_full_info.csv"
+JOURNAL_JSONL       = "data\\extracted_journals\\extracted.jsonl"
+HARD_TRAIN_CSV      = "data\\subset_hard\\train.csv"
+HARD_VAL_CSV        = "data\\subset_hard\\val.csv"
+HARD_TEST_CSV       = "data\\subset_hard\\test.csv"
+OUT_DIR             = "data\\recranker_data"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Text helpers
@@ -43,6 +43,9 @@ OUT_DIR             = "data/recranker_data"
 MAX_ABSTRACT_CHARS  = 600
 MAX_AIMS_CHARS      = 300
 MAX_KEYWORDS_CHARS  = 200
+# 5 candidates × ~195 tokens + paper (~250) + framing (~100) + response (~100) ≈ 1,425 tokens
+# → fits within MAX_SEQ_LENGTH=1536 with headroom; 20 candidates would need ~4,550 tokens
+MAX_CANDIDATES      = 5
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -215,7 +218,7 @@ def build_nl_dataset(
     shuffle_candidates: bool = True,
     seed: int = 42,
 ) -> pd.DataFrame:
-    """One row per paper (all 20 candidates grouped together)."""
+    """One row per paper (top MAX_CANDIDATES candidates from the hard subset)."""
     rng  = random.Random(seed)
     hard = pd.read_csv(hard_csv)
 
@@ -231,6 +234,14 @@ def build_nl_dataset(
             continue   # correct journal not in top-20 candidates, skip
         true_jid       = int(correct_rows["Predicted_Journal_ID"].iloc[0])
         candidate_jids = grp["Predicted_Journal_ID"].astype(int).tolist()
+
+        # Keep top MAX_CANDIDATES candidates; always ensure the correct journal is included
+        # so the chosen response can always place it at Rank 1.
+        if true_jid not in candidate_jids[:MAX_CANDIDATES]:
+            others = [j for j in candidate_jids if j != true_jid][:MAX_CANDIDATES - 1]
+            candidate_jids = [true_jid] + others
+        else:
+            candidate_jids = candidate_jids[:MAX_CANDIDATES]
 
         cand_objects = [
             {"journal_id": jid, "text": build_journal_text(jid, journals)}
