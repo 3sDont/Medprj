@@ -49,7 +49,7 @@ Lệnh này tạo virtual environment `.venv` và cài tất cả dependencies.
 
 ```powershell
 python src\pipeline.py `
-  --checkpoint_path "data\Epoch_02_SIMCPRS_dmis-lab_biobert-v1_1_CL.pth" `
+  --checkpoint_path "models\Epoch_02_SIMCPRS_dmis-lab_biobert-v1_1_CL.pth" `
   --model_name "dmis-lab/biobert-v1.1" `
   --pooler_type "cls" `
   --data_path "data" `

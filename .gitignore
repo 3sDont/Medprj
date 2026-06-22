@@ -6,7 +6,9 @@ venv/
 data/*.pth
 data/*.bin
 data/*.safetensors
-
+data/
+models/
+outputs/
 # Python cache
 __pycache__/
 *.pyc

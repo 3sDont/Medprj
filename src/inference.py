@@ -46,9 +46,12 @@ class Pooler(nn.Module):
 
 
 class ModelForSE(nn.Module):
-    def __init__(self, model_name_or_path, pooler_type):
+    def __init__(self, model_name_or_path, pooler_type, config=None):
         super().__init__()
-        self.bert = AutoModel.from_pretrained(model_name_or_path)
+        if config is not None:
+            self.bert = AutoModel.from_config(config)
+        else:
+            self.bert = AutoModel.from_pretrained(model_name_or_path)
         self.pooler_type = pooler_type
         self.pooler = Pooler(pooler_type)
 
@@ -136,18 +139,49 @@ class Model_Classifier_NoAim(nn.Module):
 # Inference
 # ──────────────────────────────────────────────
 
+def _patch_config_from_ckpt(config, state_dict: dict):
+    """
+    Overwrite config embedding sizes with the shapes stored in the checkpoint.
+    This prevents size-mismatch errors when the HuggingFace model revision differs
+    from the version used during training.
+    """
+    _map = {
+        'base_model.bert.embeddings.word_embeddings.weight':      'vocab_size',
+        'base_model.bert.embeddings.position_embeddings.weight':  'max_position_embeddings',
+        'base_model.bert.embeddings.token_type_embeddings.weight':'type_vocab_size',
+    }
+    for key, attr in _map.items():
+        if key in state_dict:
+            setattr(config, attr, state_dict[key].shape[0])
+    return config
+
+
 def load_model(checkpoint_path, model_name, pooler_type, n_classes, use_aim, device):
-    base_model = ModelForSE(model_name, pooler_type)
+    from transformers import AutoConfig
+
+    # Load checkpoint first so we can detect the exact architecture it was trained with
+    checkpoint  = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    state_dict  = checkpoint['model_state_dict']
+
+    # Patch config to match checkpoint embedding dimensions (avoids size-mismatch errors)
+    config = _patch_config_from_ckpt(AutoConfig.from_pretrained(model_name), state_dict)
+
+    # Build model from patched config — weights come entirely from the checkpoint
+    base_model = ModelForSE(model_name, pooler_type, config=config)
     if use_aim:
         model = Model_Classifier_WithAim(base_model, n_classes)
     else:
         model = Model_Classifier_NoAim(base_model, n_classes)
 
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if missing:
+        print(f"[load_model] {len(missing)} missing keys  (e.g. {missing[:2]})")
+    if unexpected:
+        print(f"[load_model] {len(unexpected)} unexpected keys (e.g. {unexpected[:2]})")
+
     model.to(device)
     model.eval()
-    print(f"Loaded checkpoint: epoch {checkpoint.get('epoch', '?')}")
+    print(f"Loaded checkpoint: epoch={checkpoint.get('epoch','?')}  device={device}")
     return model, base_model
 
 

@@ -4,7 +4,7 @@ echo  MEDPRS - Virtual Environment Setup
 echo ========================================
 
 REM Create venv using the system Python (non-Store)
-set PYTHON=C:\Users\Admin\AppData\Local\Python\bin\python3.exe
+set PYTHON=C:\Python314\python.exe
 
 echo [1/3] Creating virtual environment (.venv)...
 "%PYTHON%" -m venv .venv

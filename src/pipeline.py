@@ -20,6 +20,7 @@ CLI usage:
 """
 import os
 import sys
+import hashlib
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Allow running from project root (python src/pipeline.py) or from src/
@@ -38,6 +39,48 @@ import numpy as np
 import pandas as pd
 from transformers import AutoTokenizer
 from sentence_transformers import SentenceTransformer
+
+
+# ── Embedding cache helpers ───────────────────────────────────────────────────
+
+def _cache_tag(model_name: str, csv_path: str) -> str:
+    """Short hash that changes when model name or CSV file changes."""
+    mtime = str(os.path.getmtime(csv_path)) if os.path.exists(csv_path) else "0"
+    return hashlib.md5(f"{model_name}|{mtime}".encode()).hexdigest()[:10]
+
+
+def _load_biobert_cache(cache_dir: str, model_name: str, csv_path: str, device):
+    tag  = _cache_tag(model_name, csv_path)
+    path = os.path.join(cache_dir, f"biobert_aims_{tag}.pt")
+    if os.path.exists(path):
+        print(f"[cache] Loading BioBERT aims embeddings from {path}")
+        return torch.load(path, map_location=device, weights_only=True)
+    return None
+
+
+def _save_biobert_cache(cache_dir: str, model_name: str, csv_path: str, tensor):
+    os.makedirs(cache_dir, exist_ok=True)
+    tag  = _cache_tag(model_name, csv_path)
+    path = os.path.join(cache_dir, f"biobert_aims_{tag}.pt")
+    torch.save(tensor.cpu(), path)
+    print(f"[cache] BioBERT aims embeddings saved → {path}")
+
+
+def _load_specter_cache(cache_dir: str, model_name: str, csv_path: str):
+    tag  = _cache_tag(model_name, csv_path)
+    path = os.path.join(cache_dir, f"specter_aims_{tag}.npy")
+    if os.path.exists(path):
+        print(f"[cache] Loading SPECTER2 aims embeddings from {path}")
+        return np.load(path)
+    return None
+
+
+def _save_specter_cache(cache_dir: str, model_name: str, csv_path: str, arr: np.ndarray):
+    os.makedirs(cache_dir, exist_ok=True)
+    tag  = _cache_tag(model_name, csv_path)
+    path = os.path.join(cache_dir, f"specter_aims_{tag}.npy")
+    np.save(path, arr)
+    print(f"[cache] SPECTER2 aims embeddings saved → {path}")
 
 from inference import load_model, run_inference_single
 from aims_scope_sim import load_specter2, encode_journal_aims, compute_aims_sim_single
@@ -97,7 +140,7 @@ def load_pipeline(
     model_name: str,
     data_path: str,
     aims_csv: str              = "journal_full_info.csv",
-    journal_extract_jsonl: str = "journal_extract.jsonl",
+    journal_extract_jsonl: str = "journal_extract.json",
     encoder_model: str         = "allenai/specter2_base",
     qwen_model: str            = "Qwen/Qwen3.5-2B",
     pooler_type: str           = "cls",
@@ -105,16 +148,22 @@ def load_pipeline(
     max_len: int               = 512,
     use_aim: bool              = True,
     use_category: bool         = False,
+    cache_dir: Optional[str]   = None,
 ) -> PipelineModels:
     """
     Load all models and data needed by the pipeline.
     Call once at startup; pass the returned PipelineModels to run_pipeline().
+
+    Args:
+        cache_dir: directory for pre-computed embedding caches.
+                   Pass None to disable caching.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
     # ── Journal metadata ──────────────────────────────────────────────────────
-    journal_df = pd.read_csv(os.path.join(data_path, aims_csv), encoding="ISO-8859-1")
+    csv_path   = os.path.join(data_path, aims_csv)
+    journal_df = pd.read_csv(csv_path, encoding="ISO-8859-1")
     journal_df.fillna("", inplace=True)
     n_classes = len(journal_df)
     print(f"Loaded {n_classes} journals from {aims_csv}")
@@ -129,17 +178,36 @@ def load_pipeline(
     classifier, base_model = load_model(
         checkpoint_path, model_name, pooler_type, n_classes, use_aim, device
     )
-    print("Encoding classifier aims embeddings...")
-    aims_embeddings = base_model.encode(
-        X_aims, show_progress_bar=True, convert_to_tensor=True,
-        device=device, tokenizer=tokenizer, max_len=max_len,
-    ).to(device)
+
+    # Load BioBERT aims embeddings from cache or recompute
+    aims_embeddings = (
+        _load_biobert_cache(cache_dir, model_name, csv_path, device)
+        if cache_dir else None
+    )
+    if aims_embeddings is None:
+        print("Encoding classifier aims embeddings...")
+        aims_embeddings = base_model.encode(
+            X_aims, show_progress_bar=True, convert_to_tensor=True,
+            device=device, tokenizer=tokenizer, max_len=max_len,
+        )
+        if cache_dir:
+            _save_biobert_cache(cache_dir, model_name, csv_path, aims_embeddings)
+    aims_embeddings = aims_embeddings.to(device)
 
     # ── SPECTER2 ──────────────────────────────────────────────────────────────
     specter2 = load_specter2(encoder_model)
-    specter_aims_embs = encode_journal_aims(
-        specter2, journal_df, use_category=use_category
+
+    # Load SPECTER2 aims embeddings from cache or recompute
+    specter_aims_embs = (
+        _load_specter_cache(cache_dir, encoder_model, csv_path)
+        if cache_dir else None
     )
+    if specter_aims_embs is None:
+        specter_aims_embs = encode_journal_aims(
+            specter2, journal_df, use_category=use_category
+        )
+        if cache_dir:
+            _save_specter_cache(cache_dir, encoder_model, csv_path, specter_aims_embs)
 
     # ── Journal extract JSONL ─────────────────────────────────────────────────
     extract_path = os.path.join(data_path, journal_extract_jsonl)

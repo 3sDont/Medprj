@@ -69,28 +69,29 @@ def rerank_journals(top_journals: List[dict]) -> List[dict]:
 # ── LLM Explanation ───────────────────────────────────────────────────────────
 
 _EXPLAIN_PROMPT = """\
-Bạn là chuyên gia xuất bản khoa học. Viết giải thích ngắn gọn bằng tiếng Việt cho gợi ý tạp chí dưới đây.
+You are an expert scientific publication advisor. Given the paper and journal information \
+below, write a concise explanation for why this journal is (or is not) a good fit.
 
-=== Thông tin bài báo ===
-Tiêu đề       : {title}
-Lĩnh vực KH   : {sci_domains}
-Trọng tâm NC  : {research_focuses}
+=== Paper Information ===
+Title              : {title}
+Scientific Domains : {sci_domains}
+Research Focuses   : {research_focuses}
 
-=== Thông tin tạp chí ===
-Tên           : {journal_name}
-Hạng mới      : #{new_rank}  (hạng gốc #{old_rank}, thay đổi {rank_change:+d})
-Điểm tổng     : {final_score:.1f}/100
-Aims_Scope_Sim: {aims_sim:.3f}
-Domain overlap: {domain_cov:.0%}
-Aims coverage : {aims_cov:.0%}
-Thiếu (nếu có): {missing}
+=== Journal Information ===
+Name               : {journal_name}
+New Rank           : #{new_rank}  (original #{old_rank}, change {rank_change:+d})
+Fit Score          : {final_score:.1f}/100
+Aims/Scope Sim.    : {aims_sim:.3f}
+Domain Overlap     : {domain_cov:.0%}
+Aims Coverage      : {aims_cov:.0%}
+Missing Topics     : {missing}
 
-Trả về JSON với đúng 3 trường (mỗi trường 1-2 câu, bằng tiếng Việt):
-  "main_reasoning"    : lý do chính tạp chí này phù hợp với bài báo
-  "reranking_reasons" : lý do thay đổi/giữ nguyên thứ hạng so với hạng gốc
-  "weakness_warning"  : điểm yếu hoặc lưu ý quan trọng (để trống "" nếu không có)
+Return JSON with exactly 3 fields (1–2 sentences each, in English):
+  "main_reasoning"    : primary reason this journal fits (or does not fit) the paper
+  "reranking_reasons" : reason the rank changed (or stayed) compared to the original rank
+  "weakness_warning"  : key weakness or caveat (empty string "" if none)
 
-Chỉ trả về JSON hợp lệ, không thêm bất kỳ nội dung nào khác.\
+Return only valid JSON, no additional text.\
 """
 
 

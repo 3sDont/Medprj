@@ -6,3 +6,4 @@ pandas>=2.0.0
 numpy>=1.24.0
 anthropic>=0.111.0
 tqdm>=4.65.0
+torchvision>=0.17.0
