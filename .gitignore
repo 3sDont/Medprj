@@ -1,0 +1,40 @@
+# Virtual environment
+venv/
+.venv/
+
+# Model weights (too large for GitHub)
+data/*.pth
+data/*.bin
+data/*.safetensors
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# HuggingFace model cache
+.cache/
+
+# Pipeline output files
+result.json
+step1_inference.json
+step2_sim.json
+step3_coverage.json
+step4_final.json
+inference_result.json
+inference_with_sim.json
+inference_with_coverage.json
+final_result.json
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code internals
+.claude/
