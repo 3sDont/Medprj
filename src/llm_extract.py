@@ -38,15 +38,25 @@ class QwenExtractor:
         self.model_name = model_name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        # Use float32 on CPU for stability; float16 on CUDA for speed
-        dtype = torch.float32 if self.device == "cpu" else torch.float16
+
+        # bfloat16 on CUDA: numerically stable + supported by RTX 3060
+        # float32 on CPU: accuracy without CUDA float16 underflow risk
+        dtype       = torch.bfloat16 if self.device.startswith("cuda") else torch.float32
+        device_map  = self.device  # explicit device; "auto" would split across CPU+GPU
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            dtype=dtype,
+            torch_dtype=dtype,
+            device_map=device_map,
+            attn_implementation="eager",   # suppress flash-linear-attention warning
         )
-        self.model.to(self.device)
         self.model.eval()
-        print(f"  Qwen loaded on {self.device} ({dtype})")
+        vram = ""
+        if self.device.startswith("cuda"):
+            used = torch.cuda.memory_allocated() / 1e9
+            total = torch.cuda.get_device_properties(0).total_memory / 1e9
+            vram = f"  VRAM: {used:.1f}/{total:.1f} GB"
+        print(f"  Qwen loaded on {self.device} ({dtype}){vram}")
 
     def generate(
         self,

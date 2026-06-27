@@ -253,13 +253,13 @@ def load_result_file():
     journals = enrich_journals(journals)
     st.session_state["result"]       = {"paper": paper, "journals": journals}
     st.session_state["selected_idx"] = 0
-    st.session_state["right_view"]   = "reasoning"
+    st.session_state["right_view"]   = "information"
 
 
 # --------------------------------------------------------------------------- #
 # Session state
 # --------------------------------------------------------------------------- #
-for _k, _v in {"result": None, "selected_idx": 0, "right_view": "reasoning",
+for _k, _v in {"result": None, "selected_idx": 0, "right_view": "information",
                 "show_all": False}.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
@@ -488,7 +488,7 @@ if submitted:
         journals = enrich_journals(journals)
         st.session_state["result"]       = {"paper": paper, "journals": journals}
         st.session_state["selected_idx"] = 0
-        st.session_state["right_view"]   = "reasoning"
+        st.session_state["right_view"]   = "information"
 
 # --------------------------------------------------------------------------- #
 # Results gate
@@ -517,7 +517,7 @@ with left:
     st.markdown("<div class='section-title'>🏆 Top Recommended Journals</div>",
                 unsafe_allow_html=True)
     show_all = st.session_state["show_all"]
-    limit    = len(journals) if show_all else min(5, len(journals))
+    limit    = len(journals) if show_all else min(3, len(journals))
 
     for idx in range(limit):
         j     = journals[idx]
@@ -527,31 +527,24 @@ with left:
         match = j["Match_Level"]
         bc    = "badge-high" if match == "High Match" else ("badge-med" if match == "Medium Match" else "badge-low")
 
-        st.markdown(f"<div class='jcard{'  active' if sel else ''}'>", unsafe_allow_html=True)
-
-        row = st.columns([1, 6, 4])
-        with row[0]:
-            st.markdown(
-                f"<div style='padding-top:.3rem;'>"
-                f"<span class='rank-circle' style='background:{color};'>{idx+1}</span></div>",
-                unsafe_allow_html=True,
-            )
-        with row[1]:
-            st.markdown(f"**{j['Name']}**")
-            st.markdown(
-                f"<span class='muted'>Fit score &nbsp;</span>"
-                f"<span class='fit-num'>{int(round(score))}</span>"
-                f"<span class='fit-den'>/100</span>",
-                unsafe_allow_html=True,
-            )
-        with row[2]:
-            st.markdown(
-                f"<div style='text-align:right;padding-top:.1rem;'>"
-                f"{badge(match, bc)}<br>"
-                f"<span class='stars'>{stars_from_score(score)}</span><br>"
-                f"<span class='muted'>Confidence: {j['Confidence']}</span></div>",
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            f"<div class='jcard{'  active' if sel else ''}'>"
+            f"<div style='display:flex;gap:.75rem;align-items:flex-start;'>"
+            f"<div style='padding-top:.2rem;flex-shrink:0;'>"
+            f"<span class='rank-circle' style='background:{color};'>{idx+1}</span></div>"
+            f"<div style='flex:1;min-width:0;'>"
+            f"<div style='font-weight:700;font-size:.92rem;color:#111827;margin-bottom:.15rem;"
+            f"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{j['Name']}</div>"
+            f"<div><span class='muted'>Fit score&nbsp;</span>"
+            f"<span class='fit-num'>{int(round(score))}</span>"
+            f"<span class='fit-den'>/100</span></div></div>"
+            f"<div style='text-align:right;flex-shrink:0;padding-top:.1rem;'>"
+            f"{badge(match, bc)}<br>"
+            f"<span class='stars'>{stars_from_score(score)}</span><br>"
+            f"<span class='muted'>Confidence: {j['Confidence']}</span></div>"
+            f"</div></div>",
+            unsafe_allow_html=True,
+        )
 
         b1, b2 = st.columns(2)
         with b1:
@@ -565,9 +558,7 @@ with left:
                 st.session_state["right_view"]   = "explanation"
                 st.rerun()
 
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    if len(journals) > 5:
+    if len(journals) > 3:
         lbl = "Show fewer ▲" if show_all else f"View all {len(journals)} journals ▾"
         if st.button(lbl, key="toggle_all", use_container_width=True):
             st.session_state["show_all"] = not show_all
@@ -589,16 +580,7 @@ with right:
         unsafe_allow_html=True,
     )
 
-    tab_r, tab_i, tab_e = st.tabs(["💡 Reasoning", "📄 Information", "💬 Explanation"])
-
-    with tab_r:
-        st.markdown("**Why Recommended?**")
-        for w in sj["why_recommended"]:
-            st.markdown(f"<div class='check-row'><span class='check'>✔</span>{w}</div>",
-                        unsafe_allow_html=True)
-        st.markdown("---")
-        st.markdown("**Main reasoning**")
-        st.info(sj["Explanation"]["main_reasoning"])
+    tab_i, tab_e = st.tabs(["📄 Information", "💬 Explanation"])
 
     with tab_i:
         st.markdown(f"**{sj['Name']}** &nbsp; `{sj['Label']}`", unsafe_allow_html=True)
