@@ -459,18 +459,19 @@ if RESULT_FILE.exists():
         pass
 
 with st.form("paper_form"):
-    fc1, fc2 = st.columns([3, 2])
+    fc1, fc2 = st.columns([2, 3])
     with fc1:
         title_in    = st.text_input("Title", value=_pre_T, placeholder="Enter paper title…")
-        abstract_in = st.text_area("Abstract", value=_pre_A, height=110,
-                                   placeholder="Enter abstract…")
-    with fc2:
         keywords_in = st.text_input("Keywords (comma-separated)", value=_pre_K,
                                     placeholder="e.g. deep learning, stroke, clinical prediction")
-        st.write("")
-        models_ready = "_models" in st.session_state
+    with fc2:
+        abstract_in = st.text_area("Abstract", value=_pre_A, height=130,
+                                   placeholder="Enter abstract…")
+    models_ready = "_models" in st.session_state
+    _, btn_col, _ = st.columns([1, 2, 1])
+    with btn_col:
         submitted = st.form_submit_button(
-            "🔬 Analyze Submission",
+            "📋 Recommendation",
             type="primary",
             use_container_width=True,
             disabled=not models_ready,

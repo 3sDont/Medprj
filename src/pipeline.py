@@ -298,6 +298,7 @@ def run_pipeline(
         top_journals=top_journals,
         journal_extracts=models.journal_extracts,
         extractor=models.qwen_extractor,
+        encoder=models.specter2,
     )
 
     # ── Step 4: Rerank + Vietnamese explanations ───────────────────────────────
