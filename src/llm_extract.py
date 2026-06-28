@@ -255,14 +255,8 @@ def compute_coverage_metrics(
         res_foc_cat_cov     = round(_best_match_mean(focus_vecs, cat_vecs), 4)
         res_foc_aimscope    = round(_mean_sim_to_vec(focus_vecs, aims_vec), 4)
     else:
-        sci_dom_cat_cov     = _list_coverage(p_domains, cat_text)
-        sci_dom_evi_cat_cov = (
-            _list_coverage(p_dom_evi_phrases, cat_text) if p_dom_evi_phrases else sci_dom_cat_cov
-        )
-        sci_dom_cov         = _list_overlap(p_domains, j_domains)
-        sci_dom_aimscope    = _list_coverage(p_domains, aims_text)
-        res_foc_cat_cov     = _list_coverage(p_focuses, cat_text)
-        res_foc_aimscope    = _list_coverage(p_focuses, aims_text)
+        sci_dom_cat_cov = sci_dom_evi_cat_cov = sci_dom_cov = 0.0
+        sci_dom_aimscope = res_foc_cat_cov = res_foc_aimscope = 0.0
 
     return {
         "scientific_domains_category_coverage":          sci_dom_cat_cov,

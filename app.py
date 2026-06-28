@@ -424,28 +424,22 @@ def badge(text, cls="badge-gray"):
 # --------------------------------------------------------------------------- #
 # Header
 # --------------------------------------------------------------------------- #
-hc1, hc2 = st.columns([2, 8])
-with hc1:
-    st.markdown(
-        "<div style='display:flex;align-items:center;gap:.5rem;padding:.15rem 0;'>"
-        "<span style='font-size:1.8rem;'>🛡️</span>"
-        "<div><div style='font-size:1.1rem;font-weight:800;color:#2563eb;line-height:1.1;'>MedPRS</div>"
-        "<div style='font-size:.73rem;color:#6b7280;'>Research Assistant</div></div></div>",
-        unsafe_allow_html=True,
-    )
-with hc2:
-    st.markdown(
-        "<h2 style='margin:.1rem 0;color:#111827;font-size:1.4rem;'>"
-        "Explainable Journal Recommendation System</h2>",
-        unsafe_allow_html=True,
-    )
-
+st.markdown(
+    "<div style='display:flex;align-items:center;gap:1rem;padding:.6rem 0;overflow:visible;'>"
+    "<span style='font-size:2.2rem;flex-shrink:0;line-height:1.8;'>🛡️</span>"
+    "<div style='border-right:2px solid #e2e8f0;padding-right:1.1rem;flex-shrink:0;'>"
+    "<div style='font-size:1.2rem;font-weight:900;color:#2563eb;letter-spacing:.02em;line-height:1.6;padding:.1rem 0;'>MedPRS</div>"
+    "<div style='font-size:.72rem;color:#6b7280;font-weight:400;line-height:1.5;'>Research Assistant</div>"
+    "</div>"
+    "<div style='font-size:1.4rem;font-weight:700;color:#111827;line-height:1.6;padding:.1rem 0;'>Journal Recommendation System</div>"
+    "</div>",
+    unsafe_allow_html=True,
+)
 st.divider()
 
 # --------------------------------------------------------------------------- #
 # Paper Input form
 # --------------------------------------------------------------------------- #
-st.markdown("<div class='section-title'> Paper Input</div>", unsafe_allow_html=True)
 st.markdown("<div class='section-title'> Paper Input</div>", unsafe_allow_html=True)
 
 # Pre-fill from last result if available
@@ -479,7 +473,7 @@ with st.form("paper_form"):
     _, btn_col, _ = st.columns([1, 2, 1])
     with btn_col:
         submitted = st.form_submit_button(
-            "📋 Recommendation",
+            "Recommend Journals",
             type="primary",
             use_container_width=True,
             disabled=not models_ready,
@@ -523,7 +517,7 @@ st.divider()
 left, right = st.columns([5, 6], gap="large")
 
 with left:
-    st.markdown("<div class='section-title'>🏆 Top Recommended Journals</div>",
+    st.markdown("<div class='section-title' style='font-size:1.35rem;'>🏆 Top Recommended Journals</div>",
                 unsafe_allow_html=True)
     show_all = st.session_state["show_all"]
     limit    = len(journals) if show_all else min(3, len(journals))
@@ -593,8 +587,22 @@ with right:
     tab_i, tab_e = st.tabs(["📄 Information", "💬 Explanation"])
 
     with tab_i:
-        st.markdown(f"**Aims & Scope**", unsafe_allow_html=True)
-        st.write(sj["Aims"])
+        st.markdown("**Aims & Scope**")
+        _aims_words = sj["Aims"].split()
+        _aims_key   = f"aims_exp_{st.session_state['selected_idx']}"
+        if _aims_key not in st.session_state:
+            st.session_state[_aims_key] = False
+        if len(_aims_words) <= 50 or st.session_state[_aims_key]:
+            st.write(sj["Aims"])
+            if len(_aims_words) > 50:
+                if st.button("See less ▲", key=f"aims_btn_{st.session_state['selected_idx']}"):
+                    st.session_state[_aims_key] = False
+                    st.rerun()
+        else:
+            st.write(" ".join(_aims_words[:50]) + "…")
+            if st.button("See more ▾", key=f"aims_btn_{st.session_state['selected_idx']}"):
+                st.session_state[_aims_key] = True
+                st.rerun()
         ci1, ci2 = st.columns(2)
         with ci1:
             st.markdown("**Categories (Scientific Domains)**")
@@ -623,14 +631,19 @@ sj = journals[st.session_state["selected_idx"]]
 st.markdown("<div class='section-title'>📊 Coverage Analysis</div>", unsafe_allow_html=True)
 cv1, cv2, cv3 = st.columns(3)
 
+_RES_LIMIT = 5
+
 with cv1:
-    rows_sci = "".join(
+    p_res     = paper["paper_profile"]["research_focuses"]
+    _pk       = "cov_paper_res_exp"
+    _p_expanded = st.session_state.get(_pk, False)
+    rows_sci  = "".join(
         f"<div class='check-row'><span class='check'>✔</span>{d}</div>"
         for d in paper["paper_profile"]["scientific_domains"]
     )
-    rows_res = "".join(
+    rows_res  = "".join(
         f"<div class='check-row'><span class='check'>✔</span>{r}</div>"
-        for r in paper["paper_profile"]["research_focuses"]
+        for r in (p_res if _p_expanded or len(p_res) <= _RES_LIMIT else p_res[:_RES_LIMIT])
     )
     st.markdown(
         f"<div class='cov-card'>"
@@ -640,16 +653,24 @@ with cv1:
         f"</div>",
         unsafe_allow_html=True,
     )
+    if len(p_res) > _RES_LIMIT:
+        _lbl = "Show fewer ▲" if _p_expanded else f"Show {len(p_res) - _RES_LIMIT} more ▾"
+        if st.button(_lbl, key="btn_paper_res", use_container_width=True):
+            st.session_state[_pk] = not _p_expanded
+            st.rerun()
 
 with cv2:
+    j_res        = sj["journal_profile"]["research_focuses"]
+    _jk          = f"cov_j_res_exp_{st.session_state['selected_idx']}"
+    _j_expanded  = st.session_state.get(_jk, False)
     j_name_short = sj["Name"][:28] + ("…" if len(sj["Name"]) > 28 else "")
-    rows_sci_j = "".join(
+    rows_sci_j   = "".join(
         f"<div class='check-row'><span class='check'>✔</span>{d}</div>"
         for d in sj["journal_profile"]["scientific_domains"]
     )
-    rows_res_j = "".join(
+    rows_res_j   = "".join(
         f"<div class='check-row'><span class='check'>✔</span>{rf['name']}</div>"
-        for rf in sj["journal_profile"]["research_focuses"]
+        for rf in (j_res if _j_expanded or len(j_res) <= _RES_LIMIT else j_res[:_RES_LIMIT])
     )
     st.markdown(
         f"<div class='cov-card'>"
@@ -660,6 +681,11 @@ with cv2:
         f"</div>",
         unsafe_allow_html=True,
     )
+    if len(j_res) > _RES_LIMIT:
+        _lbl = "Show fewer ▲" if _j_expanded else f"Show {len(j_res) - _RES_LIMIT} more ▾"
+        if st.button(_lbl, key=f"btn_j_res_{st.session_state['selected_idx']}", use_container_width=True):
+            st.session_state[_jk] = not _j_expanded
+            st.rerun()
 
 with cv3:
     m       = sj["coverage_metrics"]
