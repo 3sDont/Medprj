@@ -8,7 +8,7 @@ Public API:
     QwenExtractor                       — wrapper for local Qwen model inference
     extract_paper_features(...)         -> dict  (scientific_domains, research_focuses, evidences)
     load_journal_extract(jsonl_path)    -> dict[label -> entry]
-    compute_coverage_metrics(...)       -> dict  (7 metrics + missing_coverage)
+    compute_coverage_metrics(...)       -> dict  (6 metrics)
     process_llm_extraction(...)         -> (paper_features, top_journals)
 """
 import json
@@ -160,36 +160,6 @@ def load_journal_extract(jsonl_path: str) -> Dict[str, dict]:
     return extracts
 
 
-# ── Coverage Helpers ──────────────────────────────────────────────────────────
-
-def _normalise(text: str) -> str:
-    return re.sub(r"[^a-z0-9 ]", " ", text.lower())
-
-
-def _keyword_match(term: str, target_text: str, min_word_len: int = 3) -> bool:
-    """True if any significant word from term appears in target_text."""
-    words = [w for w in _normalise(term).split() if len(w) >= min_word_len]
-    target = _normalise(target_text)
-    return bool(words) and any(w in target for w in words)
-
-
-def _list_coverage(source_terms: List[str], target_text: str) -> float:
-    """Fraction of source_terms keyword-matched in target_text."""
-    if not source_terms:
-        return 0.0
-    hits = sum(1 for t in source_terms if _keyword_match(t, target_text))
-    return round(hits / len(source_terms), 4)
-
-
-def _list_overlap(list_a: List[str], list_b: List[str]) -> float:
-    """Overlap coefficient |A∩B| / min(|A|,|B|) via fuzzy keyword matching."""
-    if not list_a or not list_b:
-        return 0.0
-    combined_b = " ".join(list_b)
-    hits = sum(1 for a in list_a if _keyword_match(a, combined_b))
-    return round(hits / min(len(list_a), len(list_b)), 4)
-
-
 def _to_text(value) -> str:
     """Accept str or list[str], return a single joined string."""
     if isinstance(value, list):
@@ -260,13 +230,6 @@ def compute_coverage_metrics(
         j_domains = journal_entry.get("scientific_domains", [])
         j_focuses = journal_entry.get("research_focuses", [])
 
-    # missing_coverage always uses keyword matching (needed for explainability)
-    combined_journal = " ".join([aims_text, cat_text] + j_domains + j_focuses)
-    missing = [
-        t for t in (p_domains + p_focuses)
-        if not _keyword_match(t, combined_journal)
-    ]
-
     if encoder is not None:
         cats = (
             journal_categories if isinstance(journal_categories, list)
@@ -308,7 +271,6 @@ def compute_coverage_metrics(
         "scientific_domains_aimscope":                   sci_dom_aimscope,
         "research_focuses_category_coverage":            res_foc_cat_cov,
         "research_focuses_coverage_aimscope":            res_foc_aimscope,
-        "missing_coverage":                              missing,
     }
 
 

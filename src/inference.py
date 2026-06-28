@@ -241,7 +241,7 @@ def run_inference_single(
     device,
     features: str = "TAK",
     max_len: int = 512,
-    topk: int = 20,
+    topk: int = 10,
     use_aim: bool = True,
 ) -> List[dict]:
     """
@@ -298,7 +298,7 @@ if __name__ == '__main__':
                         help="Feature combination: TAK | TA | TK | AK | T | A | K")
     parser.add_argument("--use_aim", action="store_true")
     parser.add_argument("--max_len",  type=int, default=512)
-    parser.add_argument("--topk",     type=int, default=20)
+    parser.add_argument("--topk",     type=int, default=10)
     parser.add_argument("--output_json", type=str, default="inference_result.json")
     args = parser.parse_args()
 

@@ -69,27 +69,32 @@ def rerank_journals(top_journals: List[dict]) -> List[dict]:
 # ── LLM Explanation ───────────────────────────────────────────────────────────
 
 _EXPLAIN_PROMPT = """\
-You are an expert scientific publication advisor. Given the paper and journal information \
-below, write a concise explanation for why this journal is (or is not) a good fit.
+You are an expert scientific publication advisor. Based on all the scores below, \
+write a concise explanation for why this journal is (or is not) a good fit for the paper.
 
-=== Paper Information ===
+=== Paper ===
 Title              : {title}
 Scientific Domains : {sci_domains}
 Research Focuses   : {research_focuses}
 
-=== Journal Information ===
-Name               : {journal_name}
-New Rank           : #{new_rank}  (original #{old_rank}, change {rank_change:+d})
-Fit Score          : {final_score:.1f}/100
-Aims/Scope Sim.    : {aims_sim:.3f}
-Domain Overlap     : {domain_cov:.0%}
-Aims Coverage      : {aims_cov:.0%}
-Missing Topics     : {missing}
+=== Journal: {journal_name} (Rank #{new_rank}) ===
+Overall Fit Score            : {final_score:.1f}/100
 
-Return JSON with exactly 3 fields (1–2 sentences each, in English):
-  "main_reasoning"    : primary reason this journal fits (or does not fit) the paper
-  "reranking_reasons" : reason the rank changed (or stayed) compared to the original rank
-  "weakness_warning"  : key weakness or caveat (empty string "" if none)
+-- Similarity Scores --
+Classifier Score             : {base_score:.4f}
+Aims/Scope Similarity        : {aims_sim:.4f}
+
+-- Coverage Scores --
+Sci. Domain → Categories     : {sci_dom_cat:.4f}
+Sci. Domain → Aims           : {sci_dom_aims:.4f}
+Sci. Domain Coverage         : {sci_dom_cov:.4f}
+Sci. Evidence → Categories   : {sci_evi_cat:.4f}
+Research Focuses → Aims      : {res_foc_aims:.4f}
+Research Focuses → Categories: {res_foc_cat:.4f}
+
+Return JSON with exactly 2 fields (2–3 sentences each, in English):
+  "main_reasoning"   : synthesize all scores to explain why this journal fits (or does not fit)
+  "weakness_warning" : highlight specific low scores as weaknesses (empty string "" if all strong)
 
 Return only valid JSON, no additional text.\
 """
@@ -110,16 +115,14 @@ def generate_explanation(
     extractor: QwenExtractor,
 ) -> dict:
     """
-    Generate a Vietnamese explanation dict for one journal recommendation using Qwen.
+    Generate an explanation dict for one journal recommendation using Qwen.
 
-    Returns dict with keys: main_reasoning, reranking_reasons, weakness_warning.
+    Returns dict with keys: main_reasoning, weakness_warning.
     """
-    features    = paper_info.get("extracted_features", {})
-    cov         = journal.get("coverage_metrics", {})
-    rerank      = journal.get("Rerank", {})
-    rank_change = int(rerank.get("rank_change", 0))
+    features = paper_info.get("extracted_features", {})
+    cov      = journal.get("coverage_metrics", {})
+    rerank   = journal.get("Rerank", {})
 
-    # Support both flat and grouped feature formats
     sci_domains_list = (
         _flatten_grouped(features.get("sci_evidence", {}))
         or features.get("scientific_domains", [])
@@ -135,13 +138,15 @@ def generate_explanation(
         research_focuses=", ".join(research_list) or "N/A",
         journal_name=journal.get("Name", ""),
         new_rank=rerank.get("new_rank", "?"),
-        old_rank=journal.get("Rank", "?"),
-        rank_change=rank_change,
         final_score=rerank.get("final_fit_score", 0.0),
+        base_score=journal.get("Base_Score", 0.0),
         aims_sim=journal.get("Aims_Scope_Sim", 0.0),
-        domain_cov=cov.get("scientific_domains_coverage", 0.0),
-        aims_cov=cov.get("scientific_domains_aimscope", 0.0),
-        missing=", ".join(cov.get("missing_coverage", [])) or "không có",
+        sci_dom_cat=cov.get("scientific_domains_category_coverage", 0.0),
+        sci_dom_aims=cov.get("scientific_domains_aimscope", 0.0),
+        sci_dom_cov=cov.get("scientific_domains_coverage", 0.0),
+        sci_evi_cat=cov.get("scientific_domains_evidence_category_coverage", 0.0),
+        res_foc_aims=cov.get("research_focuses_coverage_aimscope", 0.0),
+        res_foc_cat=cov.get("research_focuses_category_coverage", 0.0),
     )
 
     raw = extractor.generate(
@@ -149,7 +154,6 @@ def generate_explanation(
         max_new_tokens=512,
     )
 
-    # Strip thinking block and code fences
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
 
@@ -163,9 +167,8 @@ def generate_explanation(
             except json.JSONDecodeError:
                 pass
         return {
-            "main_reasoning":    raw[:300],
-            "reranking_reasons": "",
-            "weakness_warning":  "",
+            "main_reasoning":  raw[:300],
+            "weakness_warning": "",
         }
 
 

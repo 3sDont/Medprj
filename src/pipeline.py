@@ -242,8 +242,8 @@ def run_pipeline(
     abstract: str,
     keywords: str,
     models: PipelineModels,
-    topk: int               = 20,
-    top_n_explain: int      = 20,
+    topk: int               = 10,
+    top_n_explain: int      = 10,
     paper_id: Optional[str] = None,
 ) -> dict:
     """
@@ -338,7 +338,7 @@ def run_pipeline(
                 "research_evidence": _to_grouped(paper_features.get("research_focuses", [])),
             },
         },
-        "Top20_journals": top_journals,
+        "Top10_journals": top_journals,
     }
 
 
@@ -371,9 +371,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_aim",      action="store_true")
     parser.add_argument("--use_category", action="store_true")
     parser.add_argument("--max_len",      type=int, default=512)
-    parser.add_argument("--topk",         type=int, default=20)
+    parser.add_argument("--topk",         type=int, default=10)
     # Explanation options
-    parser.add_argument("--top_n_explain", type=int, default=20,
+    parser.add_argument("--top_n_explain", type=int, default=10,
                         help="Generate explanations for top N journals")
     # Output
     parser.add_argument("--output_json", type=str, default="result.json")
@@ -410,6 +410,6 @@ if __name__ == "__main__":
 
     print(f"\nResult saved → {args.output_json}")
     print("\nTop-5 journals after reranking:")
-    for j in result["Top20_journals"][:5]:
+    for j in result["Top10_journals"][:5]:
         r = j["Rerank"]
         print(f"  #{r['new_rank']:2d}  {j['Name'][:55]:55s}  score={r['final_fit_score']:.1f}")

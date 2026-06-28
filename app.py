@@ -85,12 +85,12 @@ def run_and_save(title, abstract, keywords, models):
             model=models.classifier, tokenizer=models.tokenizer,
             aims_embeddings=models.aims_embeddings, journal_df=models.journal_df,
             device=models.device, features=models.features,
-            max_len=models.max_len, topk=20, use_aim=models.use_aim,
+            max_len=models.max_len, topk=10, use_aim=models.use_aim,
         )
         for j in top_journals:
             raw = str(models.journal_df.iloc[j["journal_idx"]].get("Categories", ""))
             j["Categories"] = [c.strip() for c in raw.split(",") if c.strip()]
-        st.write("✅ Top-20 journals retrieved")
+        st.write("✅ Top-10 journals retrieved")
 
         st.write("**Step 2 / 4** — Aims/scope similarity (SPECTER2)")
         top_journals = compute_aims_sim_single(
@@ -106,6 +106,7 @@ def run_and_save(title, abstract, keywords, models):
             top_journals=top_journals,
             journal_extracts=models.journal_extracts,
             extractor=models.qwen_extractor,
+            encoder=models.specter2,
         )
         st.write("✅ Coverage metrics computed")
 
@@ -117,7 +118,7 @@ def run_and_save(title, abstract, keywords, models):
         }
         top_journals = generate_all_explanations(
             paper_info=paper_info, top_journals=top_journals,
-            extractor=models.qwen_extractor, top_n=20,
+            extractor=models.qwen_extractor, top_n=10,
         )
         for j in top_journals:
             j.pop("journal_idx", None)
@@ -135,7 +136,7 @@ def run_and_save(title, abstract, keywords, models):
                 "research_evidence": _to_grouped(paper_features.get("research_focuses", [])),
             },
         },
-        "Top20_journals": top_journals,
+        "Top10_journals": top_journals,
     }
 
     RESULT_FILE.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -179,11 +180,7 @@ def derive_why_recommended(j):
 def derive_journal_profile(j):
     sci_domains  = j["extracted_journal_features"]["sci_evi"]
     research_evi = j["extracted_journal_features"]["research_evi"]
-    missing      = [m.lower() for m in j["coverage_metrics"]["missing_coverage"]]
-    research_focuses = []
-    for rf in research_evi:
-        is_missing = any(m in rf.lower() or rf.lower() in m for m in missing)
-        research_focuses.append({"name": rf, "status": "missing" if is_missing else "covered"})
+    research_focuses = [{"name": rf, "status": "covered"} for rf in research_evi]
     return {"scientific_domains": sci_domains, "research_focuses": research_focuses}
 
 
@@ -212,8 +209,6 @@ def derive_risk_analysis(j):
         strengths.append("Above-average overall fit score")
     if not strengths:
         strengths.append("Semantic relevance to paper topic")
-    for mc in j["coverage_metrics"]["missing_coverage"]:
-        risks.append(f"Journal may not cover: '{mc}'")
     if m["scientific_domains_coverage"] == 0:
         risks.append("No direct scientific domain overlap detected")
     if not risks:
@@ -249,7 +244,7 @@ def load_result_file():
     """Load outputs/result.json, enrich, and store in session state."""
     raw = json.loads(RESULT_FILE.read_text(encoding="utf-8"))
     paper    = prepare_paper(raw["paper_information"])
-    journals = sorted(raw["Top20_journals"], key=lambda j: j["Rerank"]["new_rank"])
+    journals = sorted(raw["Top10_journals"], key=lambda j: j["Rerank"]["new_rank"])
     journals = enrich_journals(journals)
     st.session_state["result"]       = {"paper": paper, "journals": journals}
     st.session_state["selected_idx"] = 0
@@ -269,7 +264,7 @@ for _k, _v in {"result": None, "selected_idx": 0, "right_view": "information",
 # --------------------------------------------------------------------------- #
 with st.sidebar:
     st.markdown("## 🛡️ MedPRS")
-    st.caption("Explainable Journal Recommendation")
+    st.caption("Journal Recommendation")
     st.divider()
 
     st.markdown("### ⚙️ Model Configuration")
@@ -309,7 +304,7 @@ with st.sidebar:
     st.divider()
     st.markdown("### 🔬 Pipeline Steps")
     for num, col, name, desc in [
-        ("1", "#f97316", "BioBERT Classifier",  "Top-20 candidate journals"),
+        ("1", "#f97316", "BioBERT Classifier",  "Top-10 candidate journals"),
         ("2", "#2563eb", "SPECTER2 Similarity", "Aims & scope alignment"),
         ("3", "#8b5cf6", "Qwen Extraction",     "Features + coverage metrics"),
         ("4", "#14b8a6", "Re-ranking",          "Fit scoring + explanations"),
@@ -394,6 +389,12 @@ st.markdown("""
 
   .pill-id{display:inline-block;padding:.1rem .45rem;border-radius:5px;
            background:#eef2ff;color:#4f46e5;font-size:.7rem;font-weight:700;margin-left:.35rem;}
+
+  .cov-card{background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;
+            padding:1.1rem 1.25rem;min-height:220px;}
+  .cov-card-title{font-weight:700;font-size:.95rem;color:#111827;margin-bottom:.75rem;
+                  padding-bottom:.45rem;border-bottom:1px solid #f1f5f9;}
+  .cov-bar-row{display:flex;align-items:center;gap:.55rem;margin:.3rem 0 .8rem;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -444,7 +445,8 @@ st.divider()
 # --------------------------------------------------------------------------- #
 # Paper Input form
 # --------------------------------------------------------------------------- #
-st.markdown("<div class='section-title'>📄 Paper Input</div>", unsafe_allow_html=True)
+st.markdown("<div class='section-title'> Paper Input</div>", unsafe_allow_html=True)
+st.markdown("<div class='section-title'> Paper Input</div>", unsafe_allow_html=True)
 
 # Pre-fill from last result if available
 _pre_T, _pre_A, _pre_K = "", "", ""
@@ -461,12 +463,18 @@ if RESULT_FILE.exists():
 with st.form("paper_form"):
     fc1, fc2 = st.columns([2, 3])
     with fc1:
-        title_in    = st.text_input("Title", value=_pre_T, placeholder="Enter paper title…")
+        st.markdown("**Title**")
+        title_in    = st.text_input("Title", value=_pre_T, placeholder="Enter paper title…",
+                                    label_visibility="collapsed")
+        st.markdown("**Keywords**")
         keywords_in = st.text_input("Keywords (comma-separated)", value=_pre_K,
-                                    placeholder="e.g. deep learning, stroke, clinical prediction")
+                                    placeholder="e.g. deep learning, stroke, clinical prediction",
+                                    label_visibility="collapsed")
     with fc2:
+        st.markdown("**Abstract**")
         abstract_in = st.text_area("Abstract", value=_pre_A, height=130,
-                                   placeholder="Enter abstract…")
+                                   placeholder="Enter abstract…",
+                                   label_visibility="collapsed")
     models_ready = "_models" in st.session_state
     _, btn_col, _ = st.columns([1, 2, 1])
     with btn_col:
@@ -485,7 +493,7 @@ if submitted:
     else:
         raw = run_and_save(title_in, abstract_in, keywords_in, st.session_state["_models"])
         paper    = prepare_paper(raw["paper_information"])
-        journals = sorted(raw["Top20_journals"], key=lambda j: j["Rerank"]["new_rank"])
+        journals = sorted(raw["Top10_journals"], key=lambda j: j["Rerank"]["new_rank"])
         journals = enrich_journals(journals)
         st.session_state["result"]       = {"paper": paper, "journals": journals}
         st.session_state["selected_idx"] = 0
@@ -559,8 +567,9 @@ with left:
                 st.session_state["right_view"]   = "explanation"
                 st.rerun()
 
-    if len(journals) > 3:
-        lbl = "Show fewer ▲" if show_all else f"View all {len(journals)} journals ▾"
+    remaining = len(journals) - 3
+    if remaining > 0:
+        lbl = "Show fewer ▲" if show_all else f"Show {remaining} more ▾"
         if st.button(lbl, key="toggle_all", use_container_width=True):
             st.session_state["show_all"] = not show_all
             st.rerun()
@@ -584,38 +593,20 @@ with right:
     tab_i, tab_e = st.tabs(["📄 Information", "💬 Explanation"])
 
     with tab_i:
-        st.markdown(f"**{sj['Name']}** &nbsp; `{sj['Label']}`", unsafe_allow_html=True)
-        with st.expander("Full aims & scope", expanded=False):
-            st.write(sj["Aims"])
-        st.write(sj["Aims"][:240] + "…")
+        st.markdown(f"**Aims & Scope**", unsafe_allow_html=True)
+        st.write(sj["Aims"])
         ci1, ci2 = st.columns(2)
         with ci1:
-            st.markdown("**Categories**")
-            for cat in sj["Categories"]: st.markdown(f"- {cat}")
-            st.markdown("**Scientific Domains**")
+            st.markdown("**Categories (Scientific Domains)**")
             for d in sj["journal_profile"]["scientific_domains"]: st.markdown(f"- {d}")
         with ci2:
             st.markdown("**Research Focuses**")
             for rf in sj["journal_profile"]["research_focuses"]:
-                icon = "✅" if rf["status"] == "covered" else "⚠️"
-                st.markdown(f"- {icon} {rf['name']}")
-            st.markdown("**Key Metrics**")
-            m = sj["coverage_metrics"]
-            st.markdown(f"- Sci. coverage: **{pct(m['scientific_domains_coverage'])}**")
-            st.markdown(f"- Research cov.: **{pct(m['research_focuses_category_coverage'])}**")
-            st.markdown(f"- Aims/scope sim.: **{sj['Aims_Scope_Sim']:.4f}**")
-            st.markdown(f"- Base score: **{sj['Base_Score']:.6f}**")
-        if sj["coverage_metrics"]["missing_coverage"]:
-            st.markdown("**Missing coverage**")
-            st.markdown(
-                " ".join(badge(x, "badge-med") for x in sj["coverage_metrics"]["missing_coverage"]),
-                unsafe_allow_html=True,
-            )
-
+                #icon = "✅" if rf["status"] == "covered" else "⚠️"
+                st.markdown(f"- {rf['name']}")
     with tab_e:
         expl = sj["Explanation"]
         st.markdown("**Main reasoning**");     st.info(expl["main_reasoning"])
-        st.markdown("**Re-ranking reasoning**"); st.success(expl["reranking_reasons"])
         if expl.get("weakness_warning"):
             st.markdown("**Weakness warning**"); st.warning(expl["weakness_warning"])
         st.markdown("**Recommendation signals**")
@@ -633,52 +624,66 @@ st.markdown("<div class='section-title'>📊 Coverage Analysis</div>", unsafe_al
 cv1, cv2, cv3 = st.columns(3)
 
 with cv1:
-    st.markdown("**Paper Profile**")
-    st.markdown("<div class='label'>Scientific Domains</div>", unsafe_allow_html=True)
-    for d in paper["paper_profile"]["scientific_domains"]:
-        st.markdown(f"<div class='check-row'><span class='check'>✔</span>{d}</div>",
-                    unsafe_allow_html=True)
-    st.markdown("<div class='label'>Research Focuses</div>", unsafe_allow_html=True)
-    for r in paper["paper_profile"]["research_focuses"]:
-        st.markdown(f"<div class='check-row'><span class='check'>✔</span>{r}</div>",
-                    unsafe_allow_html=True)
+    rows_sci = "".join(
+        f"<div class='check-row'><span class='check'>✔</span>{d}</div>"
+        for d in paper["paper_profile"]["scientific_domains"]
+    )
+    rows_res = "".join(
+        f"<div class='check-row'><span class='check'>✔</span>{r}</div>"
+        for r in paper["paper_profile"]["research_focuses"]
+    )
+    st.markdown(
+        f"<div class='cov-card'>"
+        f"<div class='cov-card-title'>Paper Profile</div>"
+        f"<div class='label'>Scientific Domains</div>{rows_sci}"
+        f"<div class='label' style='margin-top:.8rem;'>Research Focuses</div>{rows_res}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 with cv2:
-    st.markdown("**Journal Profile**")
-    st.markdown("<div class='label'>Scientific Domains</div>", unsafe_allow_html=True)
-    for d in sj["journal_profile"]["scientific_domains"]:
-        st.markdown(f"<div class='check-row'><span class='check'>✔</span>{d}</div>",
-                    unsafe_allow_html=True)
-    st.markdown("<div class='label'>Research Focuses</div>", unsafe_allow_html=True)
-    for rf in sj["journal_profile"]["research_focuses"]:
-        if rf["status"] == "covered":
-            st.markdown(f"<div class='check-row'><span class='check'>✔</span>{rf['name']}</div>",
-                        unsafe_allow_html=True)
-        else:
-            st.markdown(
-                f"<div class='check-row'><span class='warn'>⚠</span>"
-                f"{rf['name']} <span class='muted'>(not represented)</span></div>",
-                unsafe_allow_html=True,
-            )
+    j_name_short = sj["Name"][:28] + ("…" if len(sj["Name"]) > 28 else "")
+    rows_sci_j = "".join(
+        f"<div class='check-row'><span class='check'>✔</span>{d}</div>"
+        for d in sj["journal_profile"]["scientific_domains"]
+    )
+    rows_res_j = "".join(
+        f"<div class='check-row'><span class='check'>✔</span>{rf['name']}</div>"
+        for rf in sj["journal_profile"]["research_focuses"]
+    )
+    st.markdown(
+        f"<div class='cov-card'>"
+        f"<div class='cov-card-title'>Journal Profile "
+        f"<span style='font-weight:500;color:#6b7280;font-size:.8rem;'>({j_name_short})</span></div>"
+        f"<div class='label'>Scientific Domains</div>{rows_sci_j}"
+        f"<div class='label' style='margin-top:.8rem;'>Research Focuses</div>{rows_res_j}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 with cv3:
-    st.markdown("**Coverage Summary**")
-    m = sj["coverage_metrics"]
-    st.metric("Aims/Scope Similarity", f"{sj['Aims_Scope_Sim']:.3f}")
-    st.markdown("<div class='label'>Sci. Domain Coverage</div>", unsafe_allow_html=True)
-    st.progress(m["scientific_domains_coverage"])
-    st.markdown(f"<div style='text-align:right;font-weight:700;color:#2563eb;font-size:.82rem;'>"
-                f"{pct(m['scientific_domains_coverage'])}</div>", unsafe_allow_html=True)
-    st.markdown("<div class='label'>Research Focus Coverage</div>", unsafe_allow_html=True)
-    st.progress(m["research_focuses_category_coverage"])
-    st.markdown(f"<div style='text-align:right;font-weight:700;color:#22c55e;font-size:.82rem;'>"
-                f"{pct(m['research_focuses_category_coverage'])}</div>", unsafe_allow_html=True)
-    missing = m["missing_coverage"]
-    st.markdown("<div class='label'>Missing Coverage</div>", unsafe_allow_html=True)
-    if missing:
-        st.markdown(" ".join(badge(x, "badge-med") for x in missing), unsafe_allow_html=True)
-    else:
-        st.markdown("<span class='muted'>None — full coverage ✓</span>", unsafe_allow_html=True)
+    m       = sj["coverage_metrics"]
+    aims_p  = round(min(sj["Aims_Scope_Sim"], 1.0) * 100)
+    sci_p   = round(m["scientific_domains_coverage"] * 100)
+    res_p   = round(m["research_focuses_category_coverage"] * 100)
+    def _bar(pct_val, color):
+        return (
+            f"<div class='cov-bar-row'>"
+            f"<div class='bar-track'>"
+            f"<div class='bar-fill' style='background:{color};width:{pct_val}%;'></div>"
+            f"</div>"
+            f"<span style='font-weight:700;color:{color};font-size:.82rem;flex-shrink:0;'>"
+            f"{pct_val}%</span></div>"
+        )
+    st.markdown(
+        f"<div class='cov-card'>"
+        f"<div class='cov-card-title'>Coverage Summary</div>"
+        f"<div class='label'>Aims / Scope Similarity</div>{_bar(aims_p, '#2563eb')}"
+        f"<div class='label'>Scientific Domain Coverage</div>{_bar(sci_p, '#2563eb')}"
+        f"<div class='label'>Research Focus Coverage</div>{_bar(res_p, '#22c55e')}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 st.divider()
 
