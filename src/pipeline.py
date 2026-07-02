@@ -290,10 +290,11 @@ def run_pipeline(
         use_aim=models.use_aim,
     )
 
-    # Attach Categories list (used in coverage + output JSON)
+    # Attach Categories list + Best Quartile (used in coverage + output JSON)
     for j in top_journals:
         raw_cats = str(models.journal_df.iloc[j["journal_idx"]].get("Categories", ""))
         j["Categories"] = [c.strip() for c in raw_cats.split(",") if c.strip()]
+        j["Best_Quartile"] = str(models.journal_df.iloc[j["journal_idx"]].get("Best Quartile", "") or "N/A")
 
     # ── Step 2: Aims/Scope similarity ─────────────────────────────────────────
     print("[2/4] Computing Aims_Scope_Sim (SPECTER2)...")

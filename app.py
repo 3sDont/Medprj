@@ -91,6 +91,7 @@ def run_and_save(title, abstract, keywords, models):
         for j in top_journals:
             raw = str(models.journal_df.iloc[j["journal_idx"]].get("Categories", ""))
             j["Categories"] = [c.strip() for c in raw.split(",") if c.strip()]
+            j["Best_Quartile"] = str(models.journal_df.iloc[j["journal_idx"]].get("Best Quartile", "") or "N/A")
         st.write("✅ Top-10 journals retrieved")
 
         st.write("**Step 2 / 4** — Aims/scope similarity (SPECTER2)")
@@ -149,15 +150,9 @@ def run_and_save(title, abstract, keywords, models):
 # Derivation helpers  (enrich raw JSON fields for the UI)
 # --------------------------------------------------------------------------- #
 def derive_match_level(score):
-    if score >= 40: return "High Match"
-    if score >= 25: return "Medium Match"
+    if score >= 75: return "High Match"
+    if score >= 50: return "Medium Match"
     return "Low Match"
-
-
-def derive_confidence(score):
-    if score >= 40: return "High"
-    if score >= 25: return "Medium"
-    return "Low"
 
 
 def derive_why_recommended(j):
@@ -165,15 +160,15 @@ def derive_why_recommended(j):
     reasons = []
     if j["Aims_Scope_Sim"] >= 0.8:
         reasons.append(f"High aims & scope similarity ({j['Aims_Scope_Sim']:.2f})")
-    if m["Scientific_domain_profile_AimScope_alignment"] >= 0.5:
+    if m["Scientific_domain_profile_AimScope_alignment"] >= 0.8:
         reasons.append("Scientific domain alignment with journal aims & scope")
-    if m["research_focuses_profile_aimscope_alignment"] >= 0.5:
+    if m["research_focuses_profile_aimscope_alignment"] >= 0.8:
         reasons.append("Research focus areas represented in journal scope")
-    if m["Scientific_domain_profile_category_alignment"] >= 0.5:
+    if m["Scientific_domain_profile_category_alignment"] >= 0.8:
         reasons.append("Scientific domain category overlap detected")
-    if m["research_focuses_profile_category_alignment"] >= 0.5:
+    if m["research_focuses_profile_category_alignment"] >= 0.8:
         reasons.append("Research focus category overlap detected")
-    if m["abstract_category_alignment"] >= 0.5:
+    if m["abstract_category_alignment"] >= 0.8:
         reasons.append("Abstract closely aligns with journal categories")
     if not reasons:
         reasons.append("General relevance based on semantic similarity")
@@ -202,6 +197,18 @@ _FEATURE_DISPLAY = {
 
 _TOP_CONTRIBUTORS = 5
 
+# Color per score_breakdown key (reasoning.py's _EXPLAIN_SCORES), matching
+# the same palette as _FEATURE_DISPLAY for the equivalent metric.
+_EXPLAIN_SCORE_COLORS = {
+    "aims_scope":        "#2563eb",
+    "domain_category":   "#14b8a6",
+    "domain_aimscope":   "#8b5cf6",
+    "abstract_category": "#ec4899",
+    "focus_category":    "#10b981",
+    "focus_aimscope":    "#6366f1",
+    "base_score":        "#f97316",
+}
+
 
 def derive_feature_contribution(j):
     """
@@ -227,11 +234,11 @@ def derive_risk_analysis(j):
     strengths, risks = [], []
     if j["Aims_Scope_Sim"] >= 0.8:
         strengths.append(f"High aims & scope similarity ({j['Aims_Scope_Sim']:.3f})")
-    if m["Scientific_domain_profile_AimScope_alignment"] >= 0.5:
+    if m["Scientific_domain_profile_AimScope_alignment"] >= 0.75:
         strengths.append("Scientific domain alignment with journal aims")
-    if m["research_focuses_profile_aimscope_alignment"] >= 0.5:
+    if m["research_focuses_profile_aimscope_alignment"] >= 0.75:
         strengths.append("Research focus areas covered in journal scope")
-    if j["Rerank"]["final_fit_score"] >= 30:
+    if j["Rerank"]["final_fit_score"] >= 50:
         strengths.append("Above-average overall fit score")
     if not strengths:
         strengths.append("Semantic relevance to paper topic")
@@ -239,8 +246,12 @@ def derive_risk_analysis(j):
         risks.append("Low scientific domain overlap with journal categories")
     if m["abstract_category_alignment"] < 0.3:
         risks.append("Abstract weakly aligns with journal categories")
+    if j["Base_Score"] < 0.3:
+        risks.append("Low Base Score — may indicate weak semantic match")
     if not risks:
         risks.append("No significant weaknesses identified")
+    risks.append("The explanations are AI-generated — "
+                 "double-check journal details directly with the publisher before submitting")
     return {"strengths": strengths, "risks": risks}
 
 
@@ -260,7 +271,6 @@ def prepare_paper(paper):
 def enrich_journals(journals):
     for j in journals:
         j["Match_Level"]          = derive_match_level(j["Rerank"]["final_fit_score"])
-        j["Confidence"]           = derive_confidence(j["Rerank"]["final_fit_score"])
         j["why_recommended"]      = derive_why_recommended(j)
         j["journal_profile"]      = derive_journal_profile(j)
         j["feature_contribution"] = derive_feature_contribution(j)
@@ -579,7 +589,7 @@ with left:
             f"<div style='text-align:right;flex-shrink:0;padding-top:.1rem;'>"
             f"{badge(match, bc)}<br>"
             f"<span class='stars'>{stars_from_score(score)}</span><br>"
-            f"<span class='muted'>Confidence: {j['Confidence']}</span></div>"
+            f"<span class='muted'>Best Quartile: {j.get('Best_Quartile', 'N/A')}</span></div>"
             f"</div></div>",
             unsafe_allow_html=True,
         )
@@ -616,7 +626,7 @@ with right:
         f"<span class='pill-id'>#{sj['Rerank']['new_rank']}</span></div>"
         f"<div>{badge(match, bc)}&nbsp;"
         f"<span class='muted'>Score: {sj['Rerank']['final_fit_score']:.1f}/100"
-        f"&nbsp;·&nbsp;Confidence: {sj['Confidence']}</span></div></div>",
+        f"&nbsp;·&nbsp;Best Quartile: {sj.get('Best_Quartile', 'N/A')}</span></div></div>",
         unsafe_allow_html=True,
     )
 
@@ -638,19 +648,52 @@ with right:
                 st.session_state[_aims_key] = True
                 st.rerun()
         ci1, ci2 = st.columns(2)
+        _INFO_LIMIT = 5
         with ci1:
             st.markdown("**Categories (Scientific Domains)**")
-            for d in sj["journal_profile"]["scientific_domains"]: st.markdown(f"- {d}")
+            cats        = sj["journal_profile"]["scientific_domains"]
+            _cat_key    = f"cats_exp_{st.session_state['selected_idx']}"
+            _cat_expanded = st.session_state.get(_cat_key, False)
+            for d in (cats if _cat_expanded or len(cats) <= _INFO_LIMIT else cats[:_INFO_LIMIT]):
+                st.markdown(f"- {d}")
+            if len(cats) > _INFO_LIMIT:
+                _lbl = "Show fewer ▲" if _cat_expanded else f"Show {len(cats) - _INFO_LIMIT} more ▾"
+                if st.button(_lbl, key=f"btn_cats_{st.session_state['selected_idx']}", use_container_width=True):
+                    st.session_state[_cat_key] = not _cat_expanded
+                    st.rerun()
         with ci2:
             st.markdown("**Research Focuses**")
-            for rf in sj["journal_profile"]["research_focuses"]:
+            focuses     = sj["journal_profile"]["research_focuses"]
+            _foc_key    = f"foc_exp_{st.session_state['selected_idx']}"
+            _foc_expanded = st.session_state.get(_foc_key, False)
+            for rf in (focuses if _foc_expanded or len(focuses) <= _INFO_LIMIT else focuses[:_INFO_LIMIT]):
                 st.markdown(f"- {rf['name']}")
+            if len(focuses) > _INFO_LIMIT:
+                _lbl = "Show fewer ▲" if _foc_expanded else f"Show {len(focuses) - _INFO_LIMIT} more ▾"
+                if st.button(_lbl, key=f"btn_foc_{st.session_state['selected_idx']}", use_container_width=True):
+                    st.session_state[_foc_key] = not _foc_expanded
+                    st.rerun()
 
     else:
         expl = sj["Explanation"]
-        st.markdown("**Main reasoning**");     st.info(expl["main_reasoning"])
-        if expl.get("weakness_warning"):
-            st.markdown("**Weakness warning**"); st.warning(expl["weakness_warning"])
+        st.info(expl.get("header", ""))
+        st.markdown("**Relevant Scores Explanation**")
+        for s in expl.get("score_breakdown", []):
+            color = _EXPLAIN_SCORE_COLORS.get(s["key"], "#6b7280")
+            width = int(round(min(max(s["value_pct"], 0), 100)))
+            st.markdown(
+                f"<div style='margin:.5rem 0;padding:.55rem .7rem;border-radius:8px;"
+                f"border:1px solid {color}33;border-left:4px solid {color};background:{color}0D;'>"
+                f"<div style='display:flex;align-items:center;gap:.6rem;'>"
+                f"<span style='flex:1 1 auto;font-weight:700;font-size:.92rem;color:{color};'>{s['label']}</span>"
+                f"<div class='bar-track' style='flex:0 0 90px;'>"
+                f"<div class='bar-fill' style='width:{width}%;background:{color};'></div></div>"
+                f"<span style='flex:0 0 40px;text-align:right;font-weight:700;font-size:.83rem;color:{color};'>{s['value_pct']}%</span>"
+                f"</div>"
+                f"<div style='font-size:.8rem;color:#4b5563;margin-top:.3rem;'>{s['explanation']}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
         st.markdown("**Recommendation signals**")
         for w in sj["why_recommended"]:
             st.markdown(f"<div class='check-row'><span class='check'>✔</span>{w}</div>",

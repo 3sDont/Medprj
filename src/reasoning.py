@@ -12,9 +12,12 @@ Rerank.feature_contributions), sorted by impact, for UI display. If no
 model is supplied, compute_final_score falls back to raw Base_Score.
 
 generate_explanation is a scores-only experiment: the LLM sees the journal
-name plus the same numeric signals (with a legend describing what each one
-measures) but no paper/journal text content — it must interpret the score
-meanings itself rather than reason over actual topical content.
+name plus 7 numeric signals (Base_Score, Aims_Scope_Sim, and the 5
+coverage_metrics alignments — see _EXPLAIN_SCORES; Inverse_Base_Rank and the
+final Fit Score itself are omitted) with a legend describing what each one
+measures, but no paper/journal text content. Percentages shown to the user
+are computed in Python for accuracy; the LLM only writes the prose per score
+and an overall header verdict — see generate_explanation.
 
 Public API:
     load_ltr_model(path)                                      -> dict
@@ -166,55 +169,66 @@ def rerank_journals(top_journals: List[dict], ltr_model: Optional[dict] = None) 
 
 
 # ── LLM Explanation ───────────────────────────────────────────────────────────
+# Score-only explanation: (key, human-readable label, extractor). Order here
+# is the display order everywhere (prompt, fallback, and app.py's bullets).
+_EXPLAIN_SCORES = [
+    ("aims_scope",        "How well the paper matches the journal's aims and scope",
+        lambda j, cov: j.get("Aims_Scope_Sim", 0.0)),
+    ("domain_category",   "How well the paper's research domain matches the journal's subject categories",
+        lambda j, cov: cov.get("Scientific_domain_profile_category_alignment", 0.0)),
+    ("domain_aimscope",   "How well the paper's research domain matches the journal's aims and scope",
+        lambda j, cov: cov.get("Scientific_domain_profile_AimScope_alignment", 0.0)),
+    ("abstract_category", "How well the paper's abstract matches the journal's subject categories",
+        lambda j, cov: cov.get("abstract_category_alignment", 0.0)),
+    ("focus_category",    "How well the paper's research focus matches the journal's subject categories",
+        lambda j, cov: cov.get("research_focuses_profile_category_alignment", 0.0)),
+    ("focus_aimscope",    "How well the paper's research focus matches the journal's aims and scope",
+        lambda j, cov: cov.get("research_focuses_profile_aimscope_alignment", 0.0)),
+    ("base_score",        "Overall relevance predicted by the initial recommendation model",
+        lambda j, cov: j.get("Base_Score", 0.0)),
+]
 
 _EXPLAIN_PROMPT = """\
-You are a publication advisor. You are NOT given the paper's or journal's actual \
-text content — only the journal's name and numeric match scores (0 to 1, higher \
-= stronger match, except Fit Score which is 0-100). Explain the recommendation by \
-interpreting what these scores imply, using the legend below to know what each one \
-measures. Write in plain language for a researcher unfamiliar with ML scoring — do \
-not print metric names or raw numbers in your output; instead describe what a score \
-in that range means (e.g. a high "Aims/Scope Similarity" becomes "the journal's \
-overall scope closely matches your paper's topic").
+You are an academic assistant in a scientific journal recommendation system. Explain, \
+in one sentence per score, why the journal "{journal_name}" is (or isn't) a relevant \
+match for this paper — based only on the relevance scores below. You are NOT given the \
+paper's or journal's actual text content (no domain, topic, or field names) — reason \
+only from what each score's own name below tells you it measures.
 
-=== Score legend ===
-Fit Score                         : overall predicted match, combining every signal below
-Rank quality among candidates     : how highly the initial classifier ranked this journal
-                                     versus the other candidates it considered (1.0 = its
-                                     top pick, near 0 = the weakest candidate considered)
-Aims/Scope Similarity             : how closely the journal's stated aims & scope match
-                                     the paper overall
-Sci. Domain Profile → Categories  : how well the paper's scientific domain(s) match this
-                                     journal's subject categories
-Sci. Domain Profile → Aims/Scope  : how well the paper's scientific domain(s) match the
-                                     journal's aims & scope description
-Abstract → Categories             : how well the paper's abstract matches this journal's
-                                     subject categories
-Research Focuses → Aims/Scope     : how well the paper's specific research focuses match
-                                     the journal's aims & scope
-Research Focuses → Categories     : how well the paper's specific research focuses match
-                                     this journal's subject categories
+Do not mention any specific technical or scientific field name (you don't know them). \
+Do not invent the journal's subject matter, the paper's topic, or any information not \
+given below. Do not print any percentage or score number in your sentences — describe \
+what the score level implies instead (e.g. a high score becomes "closely aligned", a low \
+score becomes "only loosely related"). Keep each sentence concise, natural, and academic \
+in tone; vary the phrasing across sentences rather than reusing one sentence pattern. \
+Never write a snake_case or underscored term (e.g. "aims_scope", "domain_category") in \
+your sentences — those only exist below as JSON field names, not as things to say.
 
-=== Journal: {journal_name} (Rank #{new_rank} of the candidates found) ===
-Fit Score                         : {final_score:.1f}/100
-Rank quality among candidates     : {inv_rank:.4f}
-Aims/Scope Similarity             : {aims_sim:.4f}
-Sci. Domain Profile → Categories  : {sci_dom_cat:.4f}
-Sci. Domain Profile → Aims/Scope  : {sci_dom_aims:.4f}
-Abstract → Categories             : {abs_cat:.4f}
-Research Focuses → Aims/Scope     : {res_foc_aims:.4f}
-Research Focuses → Categories     : {res_foc_cat:.4f}
+=== Scores for "{journal_name}" ===
+{scores}
 
-Return JSON with exactly 2 fields, in English:
-  "main_reasoning"   : 2-3 sentences. Open with a one-line verdict ("This is a strong/
-                       moderate/weak fit because...") then explain, in plain language,
-                       what the 1-2 highest scores mean for this match — without naming
-                       the metric or printing its number.
-  "weakness_warning" : 1-2 plain-language sentences interpreting the single lowest score
-                       as a concern, or "" if every score is reasonably strong.
+Return JSON with exactly these fields, in English (the quoted names below — e.g. \
+"aims_scope" — are JSON field names only; never repeat them inside a sentence value):
+  "header" : one sentence in the exact style "{journal_name} is considered a {verdict}
+             match for this paper because ...". The verdict word "{verdict}" is fixed —
+             use it exactly as given, do not choose a different strength word yourself.
+             Complete the "because ..." part by summarizing the overall pattern of scores
+             above in plain language.
+{field_instructions}
 
 Return only valid JSON, no additional text.\
 """
+
+
+def _verdict_from_score(final_fit_score: float) -> str:
+    """Deterministic strong/moderate/weak verdict from the Fit Score (0-100),
+    matching app.py's derive_match_level thresholds (75 / 50) — the LLM does
+    not choose this, it only explains it."""
+    if final_fit_score > 75:
+        return "strong"
+    if final_fit_score >= 50:
+        return "moderate"
+    return "weak"
 
 
 def generate_explanation(
@@ -223,27 +237,39 @@ def generate_explanation(
     extractor: QwenExtractor,
 ) -> dict:
     """
-    Generate an explanation dict for one journal recommendation using Qwen.
+    Generate a score-only explanation for one journal recommendation using Qwen.
 
     Experiment: the LLM only sees the journal name + numeric scores (with a
-    legend explaining what each score measures) — no paper/journal text
-    content — so paper_info's extracted_features are intentionally unused
-    here. Returns dict with keys: main_reasoning, weakness_warning.
+    legend explaining what each one measures) — no paper/journal text content
+    — so paper_info's extracted_features are intentionally unused here.
+    Percentages are computed in Python (not by the LLM) so they always match
+    the real scores. The strong/moderate/weak verdict is also decided in
+    Python via _verdict_from_score (not left to the LLM's judgment) — the
+    LLM only supplies the "because ..." reasoning for that fixed verdict,
+    plus the prose per score.
+
+    Returns: {"header": str, "score_breakdown": [{"key", "label",
+    "value_pct", "explanation"}, ...]} in the order of _EXPLAIN_SCORES.
     """
-    cov    = journal.get("coverage_metrics", {})
-    rerank = journal.get("Rerank", {})
+    cov = journal.get("coverage_metrics", {})
+    pct = {key: round(extract(journal, cov) * 100) for key, _, extract in _EXPLAIN_SCORES}
+    verdict = _verdict_from_score(journal.get("Rerank", {}).get("final_fit_score", 0.0))
+
+    # Only the human-readable label is shown as the score's "name" — the LLM
+    # never sees the snake_case key next to a percentage, so it has nothing
+    # underscored to echo back into its prose.
+    scores = "\n".join(f"- {label}: {pct[key]}%" for key, label, _ in _EXPLAIN_SCORES)
+    field_instructions = "\n".join(
+        f'  "{key}" : one sentence explaining what "{label}" (above) implies for this '
+        f"match — refer to it in plain words, never as \"{key}\""
+        for key, label, _ in _EXPLAIN_SCORES
+    )
 
     prompt = _EXPLAIN_PROMPT.format(
         journal_name=journal.get("Name", ""),
-        new_rank=rerank.get("new_rank", "?"),
-        final_score=rerank.get("final_fit_score", 0.0),
-        inv_rank=journal.get("Inverse_Base_Rank", 0.0),
-        aims_sim=journal.get("Aims_Scope_Sim", 0.0),
-        sci_dom_cat=cov.get("Scientific_domain_profile_category_alignment", 0.0),
-        sci_dom_aims=cov.get("Scientific_domain_profile_AimScope_alignment", 0.0),
-        abs_cat=cov.get("abstract_category_alignment", 0.0),
-        res_foc_aims=cov.get("research_focuses_profile_aimscope_alignment", 0.0),
-        res_foc_cat=cov.get("research_focuses_profile_category_alignment", 0.0),
+        verdict=verdict,
+        scores=scores,
+        field_instructions=field_instructions,
     )
 
     raw = extractor.generate(
@@ -255,18 +281,30 @@ def generate_explanation(
     raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
 
     try:
-        return json.loads(raw)
+        llm_out = json.loads(raw)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", raw, re.DOTALL)
+        llm_out = None
         if match:
             try:
-                return json.loads(match.group())
+                llm_out = json.loads(match.group())
             except json.JSONDecodeError:
                 pass
-        return {
-            "main_reasoning":  raw[:300],
-            "weakness_warning": "",
-        }
+        if llm_out is None:
+            llm_out = {"header": raw[:300]}
+
+    return {
+        "header": llm_out.get("header", ""),
+        "score_breakdown": [
+            {
+                "key": key,
+                "label": label,
+                "value_pct": pct[key],
+                "explanation": llm_out.get(key, ""),
+            }
+            for key, label, _ in _EXPLAIN_SCORES
+        ],
+    }
 
 
 def generate_all_explanations(
