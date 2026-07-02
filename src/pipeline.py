@@ -139,7 +139,7 @@ def load_pipeline(
     checkpoint_path: str,
     model_name: str,
     data_path: str,
-    aims_csv: str              = "journal_full_info.csv",
+    aims_csv: str              = "journal_category.csv",
     journal_extract_jsonl: str = "journal_extract.json",
     encoder_model: str         = "allenai/specter2_base",
     qwen_model: str            = "Qwen/Qwen3.5-2B",
@@ -355,7 +355,7 @@ if __name__ == "__main__":
     parser.add_argument("--pooler_type",           type=str, default="cls")
     parser.add_argument("--data_path",             type=str, required=True,
                         help="Folder containing aims CSV and journal_extract.jsonl")
-    parser.add_argument("--aims_csv",              type=str, default="journal_full_info.csv")
+    parser.add_argument("--aims_csv",              type=str, default="journal_category.csv")
     parser.add_argument("--journal_extract_jsonl", type=str, default="journal_extract.jsonl")
     parser.add_argument("--encoder_model",         type=str, default="allenai/specter2_base")
     parser.add_argument("--qwen_model",            type=str, default="Qwen/Qwen3.5-2B",

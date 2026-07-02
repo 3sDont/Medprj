@@ -20,28 +20,35 @@ from llm_extract import QwenExtractor
 # ── Scoring weights ───────────────────────────────────────────────────────────
 # Must sum to 1.0
 _WEIGHTS = {
-    "base_score":                            0.25,
-    "aims_scope_sim":                        0.20,
-    "scientific_domains_coverage":           0.20,
-    "scientific_domains_aimscope":           0.15,
-    "scientific_domains_category_coverage":  0.10,
-    "research_focuses_coverage_aimscope":    0.10,
+    "base_score":                                   0.25,
+    "aims_scope_sim":                               0.20,
+    "Scientific_domain_profile_category_alignment": 0.15,
+    "Scientific_domain_profile_AimScope_alignment":  0.15,
+    "abstract_category_alignment":                  0.10,
+    "research_focuses_profile_aimscope_alignment":  0.075,
+    "research_focuses_profile_category_alignment":  0.075,
 }
 
 
 def compute_final_score(journal: dict) -> float:
     """
-    Weighted combination of classifier score, aims similarity, and coverage metrics.
-    Returns a score in [0, 100].
+    Weighted combination of classifier score, aims similarity, and the 5
+    embedding-based coverage alignment metrics. Returns a score in [0, 100].
     """
     cov = journal.get("coverage_metrics", {})
     score = (
-        _WEIGHTS["base_score"]                             * journal.get("Base_Score", 0)          * 100
-        + _WEIGHTS["aims_scope_sim"]                       * journal.get("Aims_Scope_Sim", 0)       * 100
-        + _WEIGHTS["scientific_domains_coverage"]          * cov.get("scientific_domains_coverage", 0)          * 100
-        + _WEIGHTS["scientific_domains_aimscope"]          * cov.get("scientific_domains_aimscope", 0)          * 100
-        + _WEIGHTS["scientific_domains_category_coverage"] * cov.get("scientific_domains_category_coverage", 0) * 100
-        + _WEIGHTS["research_focuses_coverage_aimscope"]   * cov.get("research_focuses_coverage_aimscope", 0)   * 100
+        _WEIGHTS["base_score"]       * journal.get("Base_Score", 0)    * 100
+        + _WEIGHTS["aims_scope_sim"] * journal.get("Aims_Scope_Sim", 0) * 100
+        + _WEIGHTS["Scientific_domain_profile_category_alignment"]
+            * cov.get("Scientific_domain_profile_category_alignment", 0) * 100
+        + _WEIGHTS["Scientific_domain_profile_AimScope_alignment"]
+            * cov.get("Scientific_domain_profile_AimScope_alignment", 0) * 100
+        + _WEIGHTS["abstract_category_alignment"]
+            * cov.get("abstract_category_alignment", 0) * 100
+        + _WEIGHTS["research_focuses_profile_aimscope_alignment"]
+            * cov.get("research_focuses_profile_aimscope_alignment", 0) * 100
+        + _WEIGHTS["research_focuses_profile_category_alignment"]
+            * cov.get("research_focuses_profile_category_alignment", 0) * 100
     )
     return round(score, 2)
 
@@ -85,12 +92,11 @@ Classifier Score             : {base_score:.4f}
 Aims/Scope Similarity        : {aims_sim:.4f}
 
 -- Coverage Scores --
-Sci. Domain → Categories     : {sci_dom_cat:.4f}
-Sci. Domain → Aims           : {sci_dom_aims:.4f}
-Sci. Domain Coverage         : {sci_dom_cov:.4f}
-Sci. Evidence → Categories   : {sci_evi_cat:.4f}
-Research Focuses → Aims      : {res_foc_aims:.4f}
-Research Focuses → Categories: {res_foc_cat:.4f}
+Sci. Domain Profile → Categories : {sci_dom_cat:.4f}
+Sci. Domain Profile → Aims/Scope : {sci_dom_aims:.4f}
+Abstract → Categories            : {abs_cat:.4f}
+Research Focuses → Aims/Scope    : {res_foc_aims:.4f}
+Research Focuses → Categories    : {res_foc_cat:.4f}
 
 Return JSON with exactly 2 fields (2–3 sentences each, in English):
   "main_reasoning"   : synthesize all scores to explain why this journal fits (or does not fit)
@@ -141,12 +147,11 @@ def generate_explanation(
         final_score=rerank.get("final_fit_score", 0.0),
         base_score=journal.get("Base_Score", 0.0),
         aims_sim=journal.get("Aims_Scope_Sim", 0.0),
-        sci_dom_cat=cov.get("scientific_domains_category_coverage", 0.0),
-        sci_dom_aims=cov.get("scientific_domains_aimscope", 0.0),
-        sci_dom_cov=cov.get("scientific_domains_coverage", 0.0),
-        sci_evi_cat=cov.get("scientific_domains_evidence_category_coverage", 0.0),
-        res_foc_aims=cov.get("research_focuses_coverage_aimscope", 0.0),
-        res_foc_cat=cov.get("research_focuses_category_coverage", 0.0),
+        sci_dom_cat=cov.get("Scientific_domain_profile_category_alignment", 0.0),
+        sci_dom_aims=cov.get("Scientific_domain_profile_AimScope_alignment", 0.0),
+        abs_cat=cov.get("abstract_category_alignment", 0.0),
+        res_foc_aims=cov.get("research_focuses_profile_aimscope_alignment", 0.0),
+        res_foc_cat=cov.get("research_focuses_profile_category_alignment", 0.0),
     )
 
     raw = extractor.generate(

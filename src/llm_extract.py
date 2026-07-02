@@ -8,7 +8,7 @@ Public API:
     QwenExtractor                       — wrapper for local Qwen model inference
     extract_paper_features(...)         -> dict  (scientific_domains, research_focuses, evidences)
     load_journal_extract(jsonl_path)    -> dict[label -> entry]
-    compute_coverage_metrics(...)       -> dict  (6 metrics)
+    compute_coverage_metrics(...)       -> dict  (5 alignment metrics)
     process_llm_extraction(...)         -> (paper_features, top_journals)
 """
 import json
@@ -167,6 +167,18 @@ def _to_text(value) -> str:
     return str(value) if value else ""
 
 
+def _dedup(values: List[str]) -> List[str]:
+    """Case-insensitive de-duplication that preserves first-seen order."""
+    seen: set = set()
+    out: List[str] = []
+    for v in values:
+        key = v.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(v)
+    return out
+
+
 # ── Embedding-based similarity helpers ───────────────────────────────────────
 
 def _encode(texts: List[str], encoder) -> np.ndarray:
@@ -195,76 +207,72 @@ def _mean_sim_to_vec(a: np.ndarray, v: Optional[np.ndarray]) -> float:
 
 # ── Coverage Metrics ─────────────────────────────────────────────────────────
 
+_COVERAGE_METRIC_KEYS = (
+    "Scientific_domain_profile_category_alignment",
+    "Scientific_domain_profile_AimScope_alignment",
+    "abstract_category_alignment",
+    "research_focuses_profile_aimscope_alignment",
+    "research_focuses_profile_category_alignment",
+)
+
+
 def compute_coverage_metrics(
+    abstract: str,
     paper_features: dict,
-    journal_entry: Optional[dict],
     journal_aims: str,
     journal_categories,
     encoder=None,
 ) -> dict:
     """
-    Compute coverage metrics for one (paper, journal) pair.
+    Compute embedding-based alignment metrics for one (paper, journal) pair.
 
-    When encoder is provided (SentenceTransformer), all numeric metrics use
-    cosine similarity on dense embeddings.  Falls back to keyword matching
-    when encoder is None.
+    Mirrors the LTR feature set in submission_ltr_dataset/features.py:
+      - scientific_domain_profile = paper's domains + domain evidence phrases
+      - research_focuses_profile  = paper's focuses + focus evidence phrases
+      - alignment = best_match_mean(profile, journal_categories)
+                    or mean similarity of profile to the journal aims vector
 
-    Returns dict with 6 float metrics + missing_coverage list.
+    Returns dict with 5 cosine-similarity float metrics (typically in [0, 1]).
     """
     p_domains = paper_features.get("scientific_domains", [])
     p_focuses = paper_features.get("research_focuses", [])
     p_dom_evi: dict = paper_features.get("scientific_domains_evidence", {})
+    p_foc_evi: dict = paper_features.get("research_focuses_evidence", {})
 
-    p_dom_evi_phrases: List[str] = [
-        phrase
-        for phrases in p_dom_evi.values()
+    dom_evi_phrases = [
+        phrase for phrases in p_dom_evi.values()
+        for phrase in (phrases if isinstance(phrases, list) else [phrases])
+    ]
+    foc_evi_phrases = [
+        phrase for phrases in p_foc_evi.values()
         for phrase in (phrases if isinstance(phrases, list) else [phrases])
     ]
 
+    sci_domain_profile     = _dedup(p_domains + dom_evi_phrases)
+    research_focus_profile = _dedup(p_focuses + foc_evi_phrases)
+
+    if encoder is None:
+        return {k: 0.0 for k in _COVERAGE_METRIC_KEYS}
+
     aims_text = journal_aims or ""
     cat_text  = _to_text(journal_categories)
+    cats = (
+        journal_categories if isinstance(journal_categories, list)
+        else [c.strip() for c in cat_text.split(",") if c.strip()]
+    )
 
-    j_domains: List[str] = []
-    j_focuses: List[str] = []
-    if journal_entry:
-        j_domains = journal_entry.get("scientific_domains", [])
-        j_focuses = journal_entry.get("research_focuses", [])
-
-    if encoder is not None:
-        cats = (
-            journal_categories if isinstance(journal_categories, list)
-            else [c.strip() for c in cat_text.split(",") if c.strip()]
-        )
-        domain_vecs   = _encode(p_domains, encoder)
-        focus_vecs    = _encode(p_focuses, encoder)
-        evi_vecs      = _encode(p_dom_evi_phrases, encoder)
-        cat_vecs      = _encode(cats, encoder)
-        j_domain_vecs = _encode(j_domains, encoder)
-        aims_vec      = _encode([aims_text], encoder)[0] if aims_text else None
-
-        sci_dom_cat_cov     = round(_best_match_mean(domain_vecs, cat_vecs), 4)
-        sci_dom_evi_cat_cov = round(
-            _best_match_mean(evi_vecs, cat_vecs) if evi_vecs.shape[0] else sci_dom_cat_cov, 4
-        )
-        sci_dom_cov         = round(
-            _best_match_mean(domain_vecs, j_domain_vecs)
-            if j_domain_vecs.shape[0] else _mean_sim_to_vec(domain_vecs, aims_vec),
-            4,
-        )
-        sci_dom_aimscope    = round(_mean_sim_to_vec(domain_vecs, aims_vec), 4)
-        res_foc_cat_cov     = round(_best_match_mean(focus_vecs, cat_vecs), 4)
-        res_foc_aimscope    = round(_mean_sim_to_vec(focus_vecs, aims_vec), 4)
-    else:
-        sci_dom_cat_cov = sci_dom_evi_cat_cov = sci_dom_cov = 0.0
-        sci_dom_aimscope = res_foc_cat_cov = res_foc_aimscope = 0.0
+    profile_vecs  = _encode(sci_domain_profile, encoder)
+    focus_vecs    = _encode(research_focus_profile, encoder)
+    cat_vecs      = _encode(cats, encoder)
+    abstract_vecs = _encode([abstract] if abstract else [], encoder)
+    aims_vec      = _encode([aims_text], encoder)[0] if aims_text else None
 
     return {
-        "scientific_domains_category_coverage":          sci_dom_cat_cov,
-        "scientific_domains_evidence_category_coverage": sci_dom_evi_cat_cov,
-        "scientific_domains_coverage":                   sci_dom_cov,
-        "scientific_domains_aimscope":                   sci_dom_aimscope,
-        "research_focuses_category_coverage":            res_foc_cat_cov,
-        "research_focuses_coverage_aimscope":            res_foc_aimscope,
+        "Scientific_domain_profile_category_alignment": round(_best_match_mean(profile_vecs, cat_vecs), 4),
+        "Scientific_domain_profile_AimScope_alignment":  round(_mean_sim_to_vec(profile_vecs, aims_vec), 4),
+        "abstract_category_alignment":                   round(_best_match_mean(abstract_vecs, cat_vecs), 4),
+        "research_focuses_profile_aimscope_alignment":   round(_mean_sim_to_vec(focus_vecs, aims_vec), 4),
+        "research_focuses_profile_category_alignment":   round(_best_match_mean(focus_vecs, cat_vecs), 4),
     }
 
 
@@ -285,10 +293,10 @@ def process_llm_extraction(
 
     Mutates each journal dict in top_journals by adding:
       - extracted_journal_features: {sci_evi: [...], research_evi: [...]}
-      - coverage_metrics: {6 float metrics + missing_coverage list}
+      - coverage_metrics: {5 alignment metrics matching submission_ltr_dataset features}
 
-    Pass encoder (SentenceTransformer) to use embedding-based similarity;
-    omit to fall back to keyword matching.
+    Requires encoder (SentenceTransformer) for non-zero coverage metrics;
+    omitting it returns all-zero alignment scores.
 
     Returns:
         (paper_features, updated_top_journals)
@@ -309,8 +317,8 @@ def process_llm_extraction(
             "research_evi": j_focuses,
         }
         j["coverage_metrics"] = compute_coverage_metrics(
+            abstract=abstract,
             paper_features=paper_features,
-            journal_entry=journal_entry,
             journal_aims=j.get("Aims", ""),
             journal_categories=j.get("Categories", ""),
             encoder=encoder,

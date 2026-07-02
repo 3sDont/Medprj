@@ -285,8 +285,8 @@ if __name__ == '__main__':
     parser.add_argument("--pooler_type", type=str, default="cls")
     # Journal / aims data
     parser.add_argument("--data_path", type=str, required=True,
-                        help="Folder containing aims CSV (default: journal_full_info.csv)")
-    parser.add_argument("--aims_csv",    type=str, default="journal_full_info.csv")
+                        help="Folder containing aims CSV (default: journal_category.csv)")
+    parser.add_argument("--aims_csv",    type=str, default="journal_category.csv")
     parser.add_argument("--use_category", action="store_true",
                         help="Append Categories column to Aims when encoding")
     # Single paper input

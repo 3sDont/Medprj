@@ -164,14 +164,16 @@ def derive_why_recommended(j):
     reasons = []
     if j["Aims_Scope_Sim"] >= 0.8:
         reasons.append(f"High aims & scope similarity ({j['Aims_Scope_Sim']:.2f})")
-    if m["scientific_domains_aimscope"] >= 0.5:
+    if m["Scientific_domain_profile_AimScope_alignment"] >= 0.5:
         reasons.append("Scientific domain alignment with journal aims & scope")
-    if m["research_focuses_coverage_aimscope"] >= 0.5:
+    if m["research_focuses_profile_aimscope_alignment"] >= 0.5:
         reasons.append("Research focus areas represented in journal scope")
-    if m["scientific_domains_category_coverage"] > 0:
+    if m["Scientific_domain_profile_category_alignment"] >= 0.5:
         reasons.append("Scientific domain category overlap detected")
-    if m["research_focuses_category_coverage"] > 0:
+    if m["research_focuses_profile_category_alignment"] >= 0.5:
         reasons.append("Research focus category overlap detected")
+    if m["abstract_category_alignment"] >= 0.5:
+        reasons.append("Abstract closely aligns with journal categories")
     if not reasons:
         reasons.append("General relevance based on semantic similarity")
     return reasons
@@ -187,12 +189,13 @@ def derive_journal_profile(j):
 def derive_feature_contribution(j):
     m = j["coverage_metrics"]
     return [
-        {"feature": "Base Score (BioBERT)",  "weight": 0.25, "raw": min(j["Base_Score"], 1.0),                    "color": "#f97316"},
-        {"feature": "Aims & Scope Sim.",     "weight": 0.20, "raw": j["Aims_Scope_Sim"],                           "color": "#2563eb"},
-        {"feature": "Sci. Domain Coverage",  "weight": 0.20, "raw": m["scientific_domains_coverage"],              "color": "#14b8a6"},
-        {"feature": "Sci. Domain Aims",      "weight": 0.15, "raw": m["scientific_domains_aimscope"],              "color": "#8b5cf6"},
-        {"feature": "Domain Category Cov.",  "weight": 0.10, "raw": m["scientific_domains_category_coverage"],     "color": "#ec4899"},
-        {"feature": "Research Focus Aims",   "weight": 0.10, "raw": m["research_focuses_coverage_aimscope"],       "color": "#6366f1"},
+        {"feature": "Base Score (BioBERT)", "weight": 0.25,  "raw": min(j["Base_Score"], 1.0),                              "color": "#f97316"},
+        {"feature": "Aims & Scope Sim.",    "weight": 0.20,  "raw": j["Aims_Scope_Sim"],                                     "color": "#2563eb"},
+        {"feature": "Domain ↔ Category",    "weight": 0.15,  "raw": m["Scientific_domain_profile_category_alignment"],     "color": "#14b8a6"},
+        {"feature": "Domain ↔ Aims",        "weight": 0.15,  "raw": m["Scientific_domain_profile_AimScope_alignment"],     "color": "#8b5cf6"},
+        {"feature": "Abstract ↔ Category",  "weight": 0.10,  "raw": m["abstract_category_alignment"],                       "color": "#ec4899"},
+        {"feature": "Focus ↔ Aims",         "weight": 0.075, "raw": m["research_focuses_profile_aimscope_alignment"],      "color": "#6366f1"},
+        {"feature": "Focus ↔ Category",     "weight": 0.075, "raw": m["research_focuses_profile_category_alignment"],      "color": "#10b981"},
     ]
 
 
@@ -201,16 +204,18 @@ def derive_risk_analysis(j):
     strengths, risks = [], []
     if j["Aims_Scope_Sim"] >= 0.8:
         strengths.append(f"High aims & scope similarity ({j['Aims_Scope_Sim']:.3f})")
-    if m["scientific_domains_aimscope"] >= 0.5:
+    if m["Scientific_domain_profile_AimScope_alignment"] >= 0.5:
         strengths.append("Scientific domain alignment with journal aims")
-    if m["research_focuses_coverage_aimscope"] >= 0.5:
+    if m["research_focuses_profile_aimscope_alignment"] >= 0.5:
         strengths.append("Research focus areas covered in journal scope")
     if j["Rerank"]["final_fit_score"] >= 30:
         strengths.append("Above-average overall fit score")
     if not strengths:
         strengths.append("Semantic relevance to paper topic")
-    if m["scientific_domains_coverage"] == 0:
-        risks.append("No direct scientific domain overlap detected")
+    if m["Scientific_domain_profile_category_alignment"] < 0.3:
+        risks.append("Low scientific domain overlap with journal categories")
+    if m["abstract_category_alignment"] < 0.3:
+        risks.append("Abstract weakly aligns with journal categories")
     if not risks:
         risks.append("No significant weaknesses identified")
     return {"strengths": strengths, "risks": risks}
@@ -482,7 +487,9 @@ with st.form("paper_form"):
         )
 
 if submitted:
-    if not title_in.strip():
+    if "_models" not in st.session_state:
+        st.warning("Please load models from the sidebar first.")
+    elif not title_in.strip():
         st.warning("Please enter a paper title.")
     else:
         raw = run_and_save(title_in, abstract_in, keywords_in, st.session_state["_models"])
@@ -569,10 +576,11 @@ with left:
             st.rerun()
 
 with right:
-    sj   = journals[st.session_state["selected_idx"]]
+    sj         = journals[st.session_state["selected_idx"]]
     name_short = sj["Name"][:44] + ("…" if len(sj["Name"]) > 44 else "")
-    match = sj["Match_Level"]
-    bc    = "badge-high" if match == "High Match" else ("badge-med" if match == "Medium Match" else "badge-low")
+    match      = sj["Match_Level"]
+    bc         = "badge-high" if match == "High Match" else ("badge-med" if match == "Medium Match" else "badge-low")
+    view       = st.session_state["right_view"]
 
     st.markdown(
         f"<div style='margin-bottom:.55rem;'>"
@@ -584,9 +592,7 @@ with right:
         unsafe_allow_html=True,
     )
 
-    tab_i, tab_e = st.tabs(["📄 Information", "💬 Explanation"])
-
-    with tab_i:
+    if view == "information":
         st.markdown("**Aims & Scope**")
         _aims_words = sj["Aims"].split()
         _aims_key   = f"aims_exp_{st.session_state['selected_idx']}"
@@ -610,9 +616,9 @@ with right:
         with ci2:
             st.markdown("**Research Focuses**")
             for rf in sj["journal_profile"]["research_focuses"]:
-                #icon = "✅" if rf["status"] == "covered" else "⚠️"
                 st.markdown(f"- {rf['name']}")
-    with tab_e:
+
+    else:
         expl = sj["Explanation"]
         st.markdown("**Main reasoning**");     st.info(expl["main_reasoning"])
         if expl.get("weakness_warning"):
@@ -688,10 +694,7 @@ with cv2:
             st.rerun()
 
 with cv3:
-    m       = sj["coverage_metrics"]
-    aims_p  = round(min(sj["Aims_Scope_Sim"], 1.0) * 100)
-    sci_p   = round(m["scientific_domains_coverage"] * 100)
-    res_p   = round(m["research_focuses_category_coverage"] * 100)
+    m = sj["coverage_metrics"]
     def _bar(pct_val, color):
         return (
             f"<div class='cov-bar-row'>"
@@ -701,12 +704,22 @@ with cv3:
             f"<span style='font-weight:700;color:{color};font-size:.82rem;flex-shrink:0;'>"
             f"{pct_val}%</span></div>"
         )
+    _rows = [
+        ("Aims / Scope Similarity",        min(sj["Aims_Scope_Sim"], 1.0),                              "#2563eb"),
+        ("Domain ↔ Category",              m["Scientific_domain_profile_category_alignment"],           "#14b8a6"),
+        ("Domain ↔ Aims/Scope",            m["Scientific_domain_profile_AimScope_alignment"],            "#8b5cf6"),
+        ("Abstract ↔ Category",            m["abstract_category_alignment"],                             "#ec4899"),
+        ("Research Focus ↔ Aims/Scope",    m["research_focuses_profile_aimscope_alignment"],             "#6366f1"),
+        ("Research Focus ↔ Category",      m["research_focuses_profile_category_alignment"],             "#22c55e"),
+    ]
+    _body = "".join(
+        f"<div class='label'>{label}</div>{_bar(round(min(max(val, 0.0), 1.0) * 100), color)}"
+        for label, val, color in _rows
+    )
     st.markdown(
         f"<div class='cov-card'>"
         f"<div class='cov-card-title'>Coverage Summary</div>"
-        f"<div class='label'>Aims / Scope Similarity</div>{_bar(aims_p, '#2563eb')}"
-        f"<div class='label'>Scientific Domain Coverage</div>{_bar(sci_p, '#2563eb')}"
-        f"<div class='label'>Research Focus Coverage</div>{_bar(res_p, '#22c55e')}"
+        f"{_body}"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -721,14 +734,13 @@ bot1, bot2 = st.columns([3, 2], gap="large")
 
 with bot1:
     st.markdown("<div class='section-title'>📈 Feature Contribution</div>", unsafe_allow_html=True)
-    st.caption("Each signal's weight × raw value → contribution to the final fit score")
+    st.caption("Bar = raw signal strength · weight = importance · value = weight × raw contribution")
 
-    feats   = sj["feature_contribution"]
-    max_c   = max(f["raw"] * f["weight"] for f in feats) or 1
+    feats = sj["feature_contribution"]
 
     for f in feats:
         contrib = f["raw"] * f["weight"]
-        width   = int(contrib / max_c * 100)
+        width   = int(round(min(max(f["raw"], 0.0), 1.0) * 100))
         st.markdown(
             f"<div class='feat-row'>"
             f"<span class='feat-lbl'>{f['feature']}</span>"

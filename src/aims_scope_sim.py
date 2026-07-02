@@ -12,7 +12,7 @@ Usage (CLI):
     python aims_scope_sim.py \\
         --inference_json inference_result.json \\
         --data_path /path/to/data \\
-        --aims_csv journal_full_info.csv \\
+        --aims_csv journal_category.csv \\
         --output_json inference_with_sim.json
 """
 import os
@@ -109,7 +109,7 @@ if __name__ == '__main__':
     # Journal / aims data
     parser.add_argument("--data_path",    type=str, required=True,
                         help="Folder containing aims CSV")
-    parser.add_argument("--aims_csv",     type=str, default="journal_full_info.csv")
+    parser.add_argument("--aims_csv",     type=str, default="journal_category.csv")
     parser.add_argument("--use_category", action="store_true",
                         help="Append Categories column to Aims when encoding")
     # Features
