@@ -85,7 +85,7 @@ def _save_specter_cache(cache_dir: str, model_name: str, csv_path: str, arr: np.
 from inference import load_model, run_inference_single
 from aims_scope_sim import load_specter2, encode_journal_aims, compute_aims_sim_single
 from llm_extract import QwenExtractor, load_journal_extract, process_llm_extraction
-from reasoning import rerank_journals, generate_all_explanations
+from reasoning import load_ltr_model, rerank_journals, generate_all_explanations
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -131,6 +131,8 @@ class PipelineModels:
     max_len:      int  = 512
     use_aim:      bool = True
     use_category: bool = False
+    # Trained LTR model for final_fit_score (None -> falls back to raw Base_Score)
+    ltr_model:    Optional[dict] = None
 
 
 # ── Loader ───────────────────────────────────────────────────────────────────
@@ -149,6 +151,7 @@ def load_pipeline(
     use_aim: bool              = True,
     use_category: bool         = False,
     cache_dir: Optional[str]   = None,
+    ltr_model_path: Optional[str] = "models/student_model.json",
 ) -> PipelineModels:
     """
     Load all models and data needed by the pipeline.
@@ -157,6 +160,8 @@ def load_pipeline(
     Args:
         cache_dir: directory for pre-computed embedding caches.
                    Pass None to disable caching.
+        ltr_model_path: trained LTR model JSON for final_fit_score. Pass None,
+                   or a path that doesn't exist, to fall back to raw Base_Score.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -217,6 +222,14 @@ def load_pipeline(
     # ── Qwen extractor ────────────────────────────────────────────────────────
     qwen_extractor = QwenExtractor(model_name=qwen_model)
 
+    # ── Trained LTR model ─────────────────────────────────────────────────────
+    ltr_model = None
+    if ltr_model_path and os.path.exists(ltr_model_path):
+        ltr_model = load_ltr_model(ltr_model_path)
+        print(f"Loaded LTR model from {ltr_model_path}")
+    else:
+        print(f"No LTR model at {ltr_model_path!r} — final_fit_score will use raw Base_Score")
+
     return PipelineModels(
         classifier=classifier,
         base_model=base_model,
@@ -232,6 +245,7 @@ def load_pipeline(
         max_len=max_len,
         use_aim=use_aim,
         use_category=use_category,
+        ltr_model=ltr_model,
     )
 
 
@@ -303,7 +317,7 @@ def run_pipeline(
 
     # ── Step 4: Rerank + Vietnamese explanations ───────────────────────────────
     print("[4/4] Reranking + generating explanations...")
-    top_journals = rerank_journals(top_journals)
+    top_journals = rerank_journals(top_journals, models.ltr_model)
 
     paper_info = {
         "title":              title,
@@ -360,6 +374,8 @@ if __name__ == "__main__":
     parser.add_argument("--encoder_model",         type=str, default="allenai/specter2_base")
     parser.add_argument("--qwen_model",            type=str, default="Qwen/Qwen3.5-2B",
                         help="HuggingFace model ID for the Qwen extractor")
+    parser.add_argument("--ltr_model_path",        type=str, default="models/student_model.json",
+                        help="Trained LTR model JSON for final_fit_score (falls back to raw Base_Score if not found)")
     # Paper input
     parser.add_argument("--title",    type=str, default="")
     parser.add_argument("--abstract", type=str, default="")
@@ -393,6 +409,7 @@ if __name__ == "__main__":
         max_len=args.max_len,
         use_aim=args.use_aim,
         use_category=args.use_category,
+        ltr_model_path=args.ltr_model_path,
     )
 
     result = run_pipeline(

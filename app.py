@@ -41,7 +41,7 @@ st.set_page_config(
 def get_pipeline_models(checkpoint_path, model_name, data_path,
                          encoder_model, qwen_model,
                          features, max_len, use_aim, use_category,
-                         cache_dir):
+                         cache_dir, ltr_model_path):
     from pipeline import load_pipeline
     return load_pipeline(
         checkpoint_path=checkpoint_path,
@@ -54,6 +54,7 @@ def get_pipeline_models(checkpoint_path, model_name, data_path,
         use_aim=use_aim,
         use_category=use_category,
         cache_dir=cache_dir,
+        ltr_model_path=ltr_model_path,
     )
 
 
@@ -111,7 +112,7 @@ def run_and_save(title, abstract, keywords, models):
         st.write("✅ Coverage metrics computed")
 
         st.write("**Step 4 / 4** — Re-ranking & explanations (Qwen)")
-        top_journals = rerank_journals(top_journals)
+        top_journals = rerank_journals(top_journals, models.ltr_model)
         paper_info = {
             "title": title, "abstract": abstract, "keywords": keywords,
             "extracted_features": paper_features,
@@ -186,17 +187,39 @@ def derive_journal_profile(j):
     return {"scientific_domains": sci_domains, "research_focuses": research_focuses}
 
 
+# Display label + color per backend feature name (matches Coverage Summary's palette
+# for the features that also appear there).
+_FEATURE_DISPLAY = {
+    "Based_score":                                    ("Base Score (BioBERT)", "#f97316"),
+    "inverse_base_rank":                               ("Inverse Base Rank",    "#eab308"),
+    "Aims_Scope_Sim":                                  ("Aims & Scope Sim.",    "#2563eb"),
+    "Scientific_domain_profile_category_alignment":    ("Domain ↔ Category",    "#14b8a6"),
+    "Scientific_domain_profile_AimScope_alignment":    ("Domain ↔ Aims",        "#8b5cf6"),
+    "abstract_category_alignment":                     ("Abstract ↔ Category",  "#ec4899"),
+    "research_focuses_profile_aimscope_alignment":     ("Focus ↔ Aims",         "#6366f1"),
+    "research_focuses_profile_category_alignment":     ("Focus ↔ Category",     "#10b981"),
+}
+
+_TOP_CONTRIBUTORS = 5
+
+
 def derive_feature_contribution(j):
-    m = j["coverage_metrics"]
-    return [
-        {"feature": "Base Score (BioBERT)", "weight": 0.25,  "raw": min(j["Base_Score"], 1.0),                              "color": "#f97316"},
-        {"feature": "Aims & Scope Sim.",    "weight": 0.20,  "raw": j["Aims_Scope_Sim"],                                     "color": "#2563eb"},
-        {"feature": "Domain ↔ Category",    "weight": 0.15,  "raw": m["Scientific_domain_profile_category_alignment"],     "color": "#14b8a6"},
-        {"feature": "Domain ↔ Aims",        "weight": 0.15,  "raw": m["Scientific_domain_profile_AimScope_alignment"],     "color": "#8b5cf6"},
-        {"feature": "Abstract ↔ Category",  "weight": 0.10,  "raw": m["abstract_category_alignment"],                       "color": "#ec4899"},
-        {"feature": "Focus ↔ Aims",         "weight": 0.075, "raw": m["research_focuses_profile_aimscope_alignment"],      "color": "#6366f1"},
-        {"feature": "Focus ↔ Category",     "weight": 0.075, "raw": m["research_focuses_profile_category_alignment"],      "color": "#10b981"},
-    ]
+    """
+    Top features by |share of the Fit Score|, as computed by the trained LTR
+    model in reasoning.py (Rerank.feature_contributions, already sorted by
+    impact). Falls back to Base Score alone if no trained model was used.
+    """
+    contributions = j.get("Rerank", {}).get("feature_contributions", [])
+    top = []
+    for c in contributions[:_TOP_CONTRIBUTORS]:
+        label, color = _FEATURE_DISPLAY.get(c["feature"], (c["feature"], "#6b7280"))
+        top.append({
+            "feature":    label,
+            "share_pct":  c.get("share_pct", 0.0),
+            "positive":   c.get("contribution", 0.0) >= 0,
+            "color":      color,
+        })
+    return top
 
 
 def derive_risk_analysis(j):
@@ -285,6 +308,11 @@ with st.sidebar:
         max_len    = st.number_input("Max length", value=512, min_value=128, max_value=1024, step=64)
         use_aim    = st.checkbox("Use aim embeddings", value=True)
         use_cat    = st.checkbox("Use category text",  value=False)
+        ltr_path   = st.text_input("LTR model (fit score)",
+                                    value=str(_ROOT / "models" / "student_model.json"),
+                                    help="Trained model that turns Base_Score + coverage "
+                                         "signals into the Fit Score. Leave blank or point "
+                                         "to a missing file to fall back to raw Base_Score.")
 
     if st.button("Load Models", type="primary", use_container_width=True):
         if not ckpt or not dpath:
@@ -295,7 +323,7 @@ with st.sidebar:
                     st.session_state["_models"] = get_pipeline_models(
                         ckpt, mname, dpath, enc_model, qwen_model,
                         features, max_len, use_aim, use_cat,
-                        str(OUTPUT_DIR / "cache"),
+                        str(OUTPUT_DIR / "cache"), ltr_path,
                     )
                     st.success("✅ Models loaded")
                 except Exception as e:
@@ -390,7 +418,7 @@ st.markdown("""
   .feat-lbl{font-size:.8rem;color:#374151;flex:0 0 145px;white-space:nowrap;
             overflow:hidden;text-overflow:ellipsis;}
   .feat-wt {font-size:.75rem;color:#9ca3af;flex:0 0 28px;text-align:right;}
-  .feat-val{font-size:.8rem;font-weight:700;flex:0 0 38px;text-align:right;}
+  .feat-val{font-size:.8rem;font-weight:700;flex:0 0 52px;text-align:right;}
 
   .pill-id{display:inline-block;padding:.1rem .45rem;border-radius:5px;
            background:#eef2ff;color:#4f46e5;font-size:.7rem;font-weight:700;margin-left:.35rem;}
@@ -727,35 +755,31 @@ with cv3:
 st.divider()
 
 # --------------------------------------------------------------------------- #
-# Feature Contribution  +  Risk & Weakness  (2 columns, LTR block removed)
+# Feature Contribution  +  Risk & Weakness  (2 columns)
 # --------------------------------------------------------------------------- #
 sj = journals[st.session_state["selected_idx"]]
 bot1, bot2 = st.columns([3, 2], gap="large")
 
 with bot1:
     st.markdown("<div class='section-title'>📈 Feature Contribution</div>", unsafe_allow_html=True)
-    st.caption("Bar = raw signal strength · weight = importance · value = weight × raw contribution")
+    st.caption(f"Top {_TOP_CONTRIBUTORS} features driving this journal's Fit Score, by share of "
+               "the trained model's decision. Sign shows whether it pushed the score up or down.")
 
-    feats = sj["feature_contribution"]
-
-    for f in feats:
-        contrib = f["raw"] * f["weight"]
-        width   = int(round(min(max(f["raw"], 0.0), 1.0) * 100))
+    for f in sj["feature_contribution"]:
+        width = int(round(min(abs(f["share_pct"]), 100.0)))
+        sign  = "+" if f["positive"] else "−"
         st.markdown(
             f"<div class='feat-row'>"
             f"<span class='feat-lbl'>{f['feature']}</span>"
             f"<div class='bar-track'>"
             f"<div class='bar-fill' style='width:{width}%;background:{f['color']};'></div></div>"
-            f"<span class='feat-wt' style='color:{f['color']};'>{int(f['weight']*100)}%</span>"
-            f"<span class='feat-val' style='color:{f['color']};'>+{contrib*100:.1f}</span>"
+            f"<span class='feat-val' style='color:{f['color']};'>{sign}{abs(f['share_pct']):.1f}%</span>"
             f"</div>",
             unsafe_allow_html=True,
         )
 
     st.divider()
-    mc1, mc2 = st.columns(2)
-    mc1.metric("Final Fit Score",  f"{sj['Rerank']['final_fit_score']:.1f} / 100")
-    mc2.metric("Rank Change",      f"#{sj['Rank']} → #{sj['Rerank']['new_rank']}")
+    st.metric("Final Fit Score", f"{sj['Rerank']['final_fit_score']:.1f} / 100")
 
 with bot2:
     st.markdown("<div class='section-title'>🛡️ Risk & Weakness</div>", unsafe_allow_html=True)

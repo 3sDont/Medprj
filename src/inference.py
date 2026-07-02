@@ -264,14 +264,26 @@ def run_inference_single(
     for rank, (jid, score) in enumerate(zip(top_ids, top_scores), start=1):
         row = journal_df.iloc[jid]
         output.append({
-            "journal_idx": int(jid),
-            "Label":       str(row.get("Label", str(jid))),
-            "Name":        str(row.get("Journal", "")),
-            "Aims":        str(row.get("Aims", "")),
-            "Rank":        int(rank),
-            "Base_Score":  round(float(score), 6),
+            "journal_idx":       int(jid),
+            "Label":             str(row.get("Label", str(jid))),
+            "Name":              str(row.get("Journal", "")),
+            "Aims":              str(row.get("Aims", "")),
+            "Rank":              int(rank),
+            "Base_Score":        round(float(score), 6),
+            "Inverse_Base_Rank": round(_inverse_base_rank(rank, len(top_ids)), 6),
         })
     return output
+
+
+def _inverse_base_rank(rank: int, top_k: int) -> float:
+    """
+    Linear-decay score in [0, 1] from a candidate's rank within the retrieved
+    top-k: rank 1 -> 1.0, rank top_k -> 1/top_k. Mirrors the LTR feature of the
+    same name in submission_ltr_dataset/features.py.
+    """
+    if rank is None or rank <= 0 or top_k <= 0:
+        return 0.0
+    return max(0.0, (float(top_k) - float(rank) + 1.0) / float(top_k))
 
 
 if __name__ == '__main__':
