@@ -155,106 +155,6 @@ def derive_match_level(score):
     return "Low Match"
 
 
-def derive_why_recommended(j):
-    m = j["coverage_metrics"]
-    reasons = []
-    if j["Aims_Scope_Sim"] >= 0.8:
-        reasons.append(f"High aims & scope similarity ({j['Aims_Scope_Sim']:.2f})")
-    if m["Scientific_domain_profile_AimScope_alignment"] >= 0.8:
-        reasons.append("Scientific domain alignment with journal aims & scope")
-    if m["research_focuses_profile_aimscope_alignment"] >= 0.8:
-        reasons.append("Research focus areas represented in journal scope")
-    if m["Scientific_domain_profile_category_alignment"] >= 0.8:
-        reasons.append("Scientific domain category overlap detected")
-    if m["research_focuses_profile_category_alignment"] >= 0.8:
-        reasons.append("Research focus category overlap detected")
-    if m["abstract_category_alignment"] >= 0.8:
-        reasons.append("Abstract closely aligns with journal categories")
-    if not reasons:
-        reasons.append("General relevance based on semantic similarity")
-    return reasons
-
-
-def derive_journal_profile(j):
-    sci_domains  = j["extracted_journal_features"]["sci_evi"]
-    research_evi = j["extracted_journal_features"]["research_evi"]
-    research_focuses = [{"name": rf, "status": "covered"} for rf in research_evi]
-    return {"scientific_domains": sci_domains, "research_focuses": research_focuses}
-
-
-# Display label + color per backend feature name (matches Coverage Summary's palette
-# for the features that also appear there).
-_FEATURE_DISPLAY = {
-    "Based_score":                                    ("Base Score (BioBERT)", "#f97316"),
-    "inverse_base_rank":                               ("Inverse Base Rank",    "#eab308"),
-    "Aims_Scope_Sim":                                  ("Aims & Scope Sim.",    "#2563eb"),
-    "Scientific_domain_profile_category_alignment":    ("Domain ↔ Category",    "#14b8a6"),
-    "Scientific_domain_profile_AimScope_alignment":    ("Domain ↔ Aims",        "#8b5cf6"),
-    "abstract_category_alignment":                     ("Abstract ↔ Category",  "#ec4899"),
-    "research_focuses_profile_aimscope_alignment":     ("Focus ↔ Aims",         "#6366f1"),
-    "research_focuses_profile_category_alignment":     ("Focus ↔ Category",     "#10b981"),
-}
-
-_TOP_CONTRIBUTORS = 5
-
-# Color per score_breakdown key (reasoning.py's _EXPLAIN_SCORES), matching
-# the same palette as _FEATURE_DISPLAY for the equivalent metric.
-_EXPLAIN_SCORE_COLORS = {
-    "aims_scope":        "#2563eb",
-    "domain_category":   "#14b8a6",
-    "domain_aimscope":   "#8b5cf6",
-    "abstract_category": "#ec4899",
-    "focus_category":    "#10b981",
-    "focus_aimscope":    "#6366f1",
-    "base_score":        "#f97316",
-}
-
-
-def derive_feature_contribution(j):
-    """
-    Top features by |share of the Fit Score|, as computed by the trained LTR
-    model in reasoning.py (Rerank.feature_contributions, already sorted by
-    impact). Falls back to Base Score alone if no trained model was used.
-    """
-    contributions = j.get("Rerank", {}).get("feature_contributions", [])
-    top = []
-    for c in contributions[:_TOP_CONTRIBUTORS]:
-        label, color = _FEATURE_DISPLAY.get(c["feature"], (c["feature"], "#6b7280"))
-        top.append({
-            "feature":    label,
-            "share_pct":  c.get("share_pct", 0.0),
-            "positive":   c.get("contribution", 0.0) >= 0,
-            "color":      color,
-        })
-    return top
-
-
-def derive_risk_analysis(j):
-    m = j["coverage_metrics"]
-    strengths, risks = [], []
-    if j["Aims_Scope_Sim"] >= 0.8:
-        strengths.append(f"High aims & scope similarity ({j['Aims_Scope_Sim']:.3f})")
-    if m["Scientific_domain_profile_AimScope_alignment"] >= 0.75:
-        strengths.append("Scientific domain alignment with journal aims")
-    if m["research_focuses_profile_aimscope_alignment"] >= 0.75:
-        strengths.append("Research focus areas covered in journal scope")
-    if j["Rerank"]["final_fit_score"] >= 50:
-        strengths.append("Above-average overall fit score")
-    if not strengths:
-        strengths.append("Semantic relevance to paper topic")
-    if m["Scientific_domain_profile_category_alignment"] < 0.3:
-        risks.append("Low scientific domain overlap with journal categories")
-    if m["abstract_category_alignment"] < 0.3:
-        risks.append("Abstract weakly aligns with journal categories")
-    if j["Base_Score"] < 0.3:
-        risks.append("Low Base Score — may indicate weak semantic match")
-    if not risks:
-        risks.append("No significant weaknesses identified")
-    risks.append("The explanations are AI-generated — "
-                 "double-check journal details directly with the publisher before submitting")
-    return {"strengths": strengths, "risks": risks}
-
-
 def prepare_paper(paper):
     sci_domains, research_focuses = [], []
     for vals in paper["extracted_paper_features"]["sci_evidence"].values():
@@ -270,11 +170,7 @@ def prepare_paper(paper):
 
 def enrich_journals(journals):
     for j in journals:
-        j["Match_Level"]          = derive_match_level(j["Rerank"]["final_fit_score"])
-        j["why_recommended"]      = derive_why_recommended(j)
-        j["journal_profile"]      = derive_journal_profile(j)
-        j["feature_contribution"] = derive_feature_contribution(j)
-        j["risk_analysis"]        = derive_risk_analysis(j)
+        j["Match_Level"] = derive_match_level(j["Rerank"]["final_fit_score"])
     return journals
 
 
@@ -286,14 +182,12 @@ def load_result_file():
     journals = enrich_journals(journals)
     st.session_state["result"]       = {"paper": paper, "journals": journals}
     st.session_state["selected_idx"] = 0
-    st.session_state["right_view"]   = "information"
 
 
 # --------------------------------------------------------------------------- #
 # Session state
 # --------------------------------------------------------------------------- #
-for _k, _v in {"result": None, "selected_idx": 0, "right_view": "information",
-                "show_all": False}.items():
+for _k, _v in {"result": None, "selected_idx": 0, "kw_chips": None}.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
@@ -307,9 +201,9 @@ with st.sidebar:
 
     st.markdown("### ⚙️ Model Configuration")
     ckpt  = st.text_input("Checkpoint (.pth)",
-                          value=r"D:\File\KLTN\Medprj\models\Epoch_02_SIMCPRS_dmis-lab_biobert-v1_1_CL.pth")
+                          value=str(_ROOT / "models" / "Epoch_02_SIMCPRS_dmis-lab_biobert-v1_1_CL.pth"))
     mname = st.text_input("Base model", value="dmis-lab/biobert-v1.1")
-    dpath = st.text_input("Data folder", value=r"D:\File\KLTN\Medprj\data")
+    dpath = st.text_input("Data folder", value=str(_ROOT / "data"))
 
     with st.expander("Advanced options"):
         enc_model  = st.text_input("SPECTER2 model",   value="allenai/specter2_base")
@@ -379,7 +273,7 @@ st.markdown("""
 <style>
   .stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"],
   [data-testid="stMain"],body{background:#f8fafc !important;}
-  .block-container{padding-top:1.4rem;padding-bottom:2rem;max-width:1280px;}
+  .block-container{padding-top:1.4rem;padding-bottom:2rem;max-width:1600px;}
 
   button[kind="primary"]{background:#2563eb!important;border-color:#2563eb!important;border-radius:8px!important;}
   button[kind="primary"]:hover{background:#1d4ed8!important;}
@@ -390,25 +284,22 @@ st.markdown("""
   .label{font-size:.73rem;font-weight:600;color:#6b7280;text-transform:uppercase;
          letter-spacing:.05em;margin-bottom:.2rem;}
 
-  .badge{display:inline-flex;align-items:center;padding:.15rem .6rem;border-radius:999px;
-         font-size:.7rem;font-weight:600;line-height:1.4;}
+  .badge{display:inline-flex;align-items:center;justify-content:center;width:118px;
+         padding:.25rem .8rem;border-radius:999px;
+         font-size:.95rem;font-weight:600;line-height:1.4;white-space:nowrap;}
   .badge-high{background:#dcfce7;color:#16a34a;}
   .badge-med {background:#fef3c7;color:#d97706;}
   .badge-low {background:#fee2e2;color:#dc2626;}
   .badge-blue{background:#dbeafe;color:#2563eb;}
   .badge-gray{background:#f3f4f6;color:#374151;}
 
-  .jcard{border:1px solid #e2e8f0;border-radius:14px;padding:.95rem 1.1rem;
-         margin-bottom:.7rem;background:#fff;transition:box-shadow .15s,border-color .15s;}
-  .jcard:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);}
-  .jcard.active{border:2px solid #2563eb;background:#eff6ff;}
-  .rank-circle{width:28px;height:28px;border-radius:50%;color:#fff;font-weight:700;
-               font-size:.8rem;display:inline-flex;align-items:center;
+  .rank-circle{width:34px;height:34px;border-radius:50%;color:#fff;font-weight:700;
+               font-size:.95rem;display:inline-flex;align-items:center;
                justify-content:center;flex-shrink:0;}
 
-  .fit-num{font-size:1.4rem;font-weight:800;color:#111827;line-height:1.1;}
-  .fit-den{font-size:.82rem;color:#9ca3af;font-weight:500;}
-  .stars  {color:#f59e0b;font-size:.9rem;letter-spacing:1px;}
+  .fit-num{font-size:1.3rem;font-weight:800;color:#111827;line-height:1.1;}
+  .fit-den{font-size:.78rem;color:#9ca3af;font-weight:500;}
+  .stars  {color:#f59e0b;font-size:1.35rem;letter-spacing:1px;}
   .muted  {color:#6b7280;font-size:.78rem;}
 
   .check-row{display:flex;align-items:flex-start;gap:.4rem;margin:.28rem 0;
@@ -419,25 +310,44 @@ st.markdown("""
   .bar-track{background:#e5e7eb;border-radius:999px;height:7px;overflow:hidden;flex:1;}
   .bar-fill {height:7px;border-radius:999px;}
 
-  .strengths-box{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:.8rem 1rem;}
-  .risks-box   {background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;
-                padding:.8rem 1rem;margin-top:.7rem;}
-  .box-title{font-weight:700;font-size:.88rem;margin-bottom:.35rem;}
-
-  .feat-row{display:flex;align-items:center;gap:.5rem;margin:.38rem 0;}
-  .feat-lbl{font-size:.8rem;color:#374151;flex:0 0 145px;white-space:nowrap;
-            overflow:hidden;text-overflow:ellipsis;}
-  .feat-wt {font-size:.75rem;color:#9ca3af;flex:0 0 28px;text-align:right;}
-  .feat-val{font-size:.8rem;font-weight:700;flex:0 0 52px;text-align:right;}
-
-  .pill-id{display:inline-block;padding:.1rem .45rem;border-radius:5px;
-           background:#eef2ff;color:#4f46e5;font-size:.7rem;font-weight:700;margin-left:.35rem;}
-
-  .cov-card{background:#fff;border:1.5px solid #e2e8f0;border-radius:14px;
-            padding:1.1rem 1.25rem;min-height:220px;}
   .cov-card-title{font-weight:700;font-size:.95rem;color:#111827;margin-bottom:.75rem;
                   padding-bottom:.45rem;border-bottom:1px solid #f1f5f9;}
-  .cov-bar-row{display:flex;align-items:center;gap:.55rem;margin:.3rem 0 .8rem;}
+
+  .reasoning-box{background:#fff;border:1px solid #e2e8f0;border-radius:10px;
+                 padding:.9rem 1.1rem;font-size:.88rem;color:#1e3a5f;line-height:1.55;}
+  .reasoning-title{font-weight:700;font-size:1.2rem;color:#111827;margin-bottom:.5rem;
+                    display:flex;align-items:center;gap:.4rem;}
+
+  div[data-testid="stButton"] > button[kind="secondary"]{
+    background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:.75rem;
+    padding:.15rem .5rem;
+  }
+
+  div[class*="st-key-select_"] button{
+    background:linear-gradient(135deg,#7c3aed,#4f46e5) !important;border:1.5px solid transparent !important;
+    color:#fff !important;border-radius:999px !important;font-weight:600 !important;
+    box-shadow:0 2px 6px rgba(79,70,229,.35) !important;transition:all .15s ease !important;
+  }
+  div[class*="st-key-select_"] button:hover{
+    box-shadow:0 4px 12px rgba(79,70,229,.5) !important;transform:translateY(-1px);
+  }
+
+  div.st-key-pi_title, div.st-key-pi_abstract, div.st-key-pi_keywords{
+    background:#fff !important;min-height:210px;
+  }
+
+  div.st-key-paper_profile_card .cov-card-title{font-size:1.2rem;}
+  div.st-key-paper_profile_card .label{font-size:.9rem;}
+  div.st-key-paper_profile_card .check-row{font-size:1rem;}
+
+  div[class*="st-key-jrow_"]{padding:.9rem 1.1rem !important;}
+
+  div.st-key-detail_card .label{font-size:1.05rem;font-weight:700;color:#111827;}
+  div.st-key-detail_card .check-row{font-size:.85rem;}
+
+  div.st-key-detail_aims, div.st-key-detail_cats, div.st-key-detail_scores{
+    background:#fff !important;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -456,12 +366,52 @@ def stars_from_score(score):
     return "★" * full + ("⯨" if half else "") + "☆" * empty
 
 
-def pct(x):
-    return f"{round(x * 100)}%"
-
-
 def badge(text, cls="badge-gray"):
     return f"<span class='badge {cls}'>{text}</span>"
+
+
+def render_checklist(items, session_key, limit=5):
+    """Checkmark list with a Show more/fewer toggle past `limit` items."""
+    expanded = st.session_state.get(session_key, False)
+    shown = items if (expanded or len(items) <= limit) else items[:limit]
+    rows = "".join(f"<div class='check-row'><span class='check'>✔️</span>{it}</div>" for it in shown)
+    st.markdown(rows or "<span class='muted'>None detected</span>", unsafe_allow_html=True)
+    if len(items) > limit:
+        lbl = "Show fewer ▲" if expanded else f"Show {len(items) - limit} more ▾"
+        if st.button(lbl, key=f"btn_{session_key}", use_container_width=True):
+            st.session_state[session_key] = not expanded
+            st.rerun()
+
+
+# The 4 real score_breakdown metrics (from reasoning.py's _EXPLAIN_SCORES)
+# shown in the "Score Explanation" panel, with short display labels. Each
+# row's percentage and description text are the real, already-computed
+# metric and the LLM's own per-metric explanation — nothing is invented.
+_SCORE_ITEMS = [
+    ("base_score",       "Base Score",         "🧮"),
+    ("aims_scope",       "Aims & Scope Match", "🎯"),
+    ("domain_category",  "Domain Match",       "📖"),
+    ("abstract_category","Abstract Match",     "📝"),
+]
+_SCORE_COLORS = {
+    "base_score":        "#f97316",
+    "aims_scope":        "#2563eb",
+    "domain_category":   "#14b8a6",
+    "abstract_category": "#ec4899",
+}
+
+
+def select_score_explanation(sj):
+    by_key = {s["key"]: s for s in sj["Explanation"].get("score_breakdown", [])}
+    items = []
+    for key, label, icon in _SCORE_ITEMS:
+        s = by_key.get(key, {})
+        items.append({
+            "key": key, "label": label, "icon": icon,
+            "pct": s.get("value_pct", 0),
+            "desc": s.get("explanation", ""),
+        })
+    return items
 
 
 # --------------------------------------------------------------------------- #
@@ -483,48 +433,78 @@ st.divider()
 # --------------------------------------------------------------------------- #
 # Paper Input form
 # --------------------------------------------------------------------------- #
-st.markdown("<div class='section-title'> Paper Input</div>", unsafe_allow_html=True)
+# Pre-fill from last result if available (only on first load of these keys)
+if "title_in" not in st.session_state:
+    _pre_T, _pre_A, _pre_K = "", "", []
+    if RESULT_FILE.exists():
+        try:
+            _prev = json.loads(RESULT_FILE.read_text(encoding="utf-8"))
+            _inp  = _prev["paper_information"]["inputs"]
+            _pre_T = _inp.get("T", "")
+            _pre_A = _inp.get("A", "")
+            _pre_K = list(_inp.get("K", []))
+        except Exception:
+            pass
+    st.session_state["title_in"]    = _pre_T
+    st.session_state["abstract_in"] = _pre_A
+    st.session_state["kw_chips"]    = _pre_K
 
-# Pre-fill from last result if available
-_pre_T, _pre_A, _pre_K = "", "", ""
-if RESULT_FILE.exists():
-    try:
-        _prev = json.loads(RESULT_FILE.read_text(encoding="utf-8"))
-        _inp  = _prev["paper_information"]["inputs"]
-        _pre_T = _inp.get("T", "")
-        _pre_A = _inp.get("A", "")
-        _pre_K = ", ".join(_inp.get("K", []))
-    except Exception:
-        pass
+if st.session_state["kw_chips"] is None:
+    st.session_state["kw_chips"] = []
 
-with st.form("paper_form"):
-    fc1, fc2 = st.columns([2, 3])
-    with fc1:
+
+def _add_keyword():
+    val = st.session_state.get("kw_add_input", "").strip()
+    if val and val not in st.session_state["kw_chips"]:
+        st.session_state["kw_chips"].append(val)
+    st.session_state["kw_add_input"] = ""
+
+
+models_ready = "_models" in st.session_state
+
+hdr_l, hdr_r = st.columns([5, 1])
+with hdr_l:
+    st.markdown("<div class='section-title' style='font-size:1.55rem;'>📘 Paper Input</div>", unsafe_allow_html=True)
+with hdr_r:
+    submitted = st.button(
+        "⭐ Recommend Journals",
+        type="primary",
+        use_container_width=True,
+        disabled=not models_ready,
+        help="Load models from the sidebar first" if not models_ready else
+             "Run the pipeline and save results to outputs/result.json",
+    )
+
+fc1, fc2, fc3 = st.columns([2, 3, 2.2], gap="medium")
+with fc1:
+    with st.container(border=True, key="pi_title"):
         st.markdown("**Title**")
-        title_in    = st.text_input("Title", value=_pre_T, placeholder="Enter paper title…",
-                                    label_visibility="collapsed")
-        st.markdown("**Keywords**")
-        keywords_in = st.text_input("Keywords (comma-separated)", value=_pre_K,
-                                    placeholder="e.g. deep learning, stroke, clinical prediction",
-                                    label_visibility="collapsed")
-    with fc2:
+        st.text_input("Title", key="title_in", placeholder="Enter paper title…",
+                      label_visibility="collapsed")
+with fc2:
+    with st.container(border=True, key="pi_abstract"):
         st.markdown("**Abstract**")
-        abstract_in = st.text_area("Abstract", value=_pre_A, height=130,
-                                   placeholder="Enter abstract…",
-                                   label_visibility="collapsed")
-    models_ready = "_models" in st.session_state
-    _, btn_col, _ = st.columns([1, 2, 1])
-    with btn_col:
-        submitted = st.form_submit_button(
-            "Recommend Journals",
-            type="primary",
-            use_container_width=True,
-            disabled=not models_ready,
-            help="Load models from the sidebar first" if not models_ready else
-                 "Run the pipeline and save results to outputs/result.json",
-        )
+        st.text_area("Abstract", key="abstract_in", height=130,
+                     placeholder="Enter abstract…", label_visibility="collapsed")
+with fc3:
+    with st.container(border=True, key="pi_keywords"):
+        st.markdown("**Keywords**")
+        chips = st.session_state["kw_chips"]
+        for i in range(0, len(chips), 2):
+            row = chips[i:i + 2]
+            for c, kw in zip(st.columns(len(row)), row):
+                with c:
+                    if st.button(f"{kw}  ✕", key=f"kwdel_{kw}", use_container_width=True):
+                        st.session_state["kw_chips"].remove(kw)
+                        st.rerun()
+        st.text_input("Add keyword", key="kw_add_input",
+                      placeholder="Add keyword and press Enter…",
+                      label_visibility="collapsed", on_change=_add_keyword)
 
 if submitted:
+    title_in    = st.session_state["title_in"]
+    abstract_in = st.session_state["abstract_in"]
+    keywords_in = ", ".join(st.session_state["kw_chips"])
     if "_models" not in st.session_state:
         st.warning("Please load models from the sidebar first.")
     elif not title_in.strip():
@@ -536,7 +516,6 @@ if submitted:
         journals = enrich_journals(journals)
         st.session_state["result"]       = {"paper": paper, "journals": journals}
         st.session_state["selected_idx"] = 0
-        st.session_state["right_view"]   = "information"
 
 # --------------------------------------------------------------------------- #
 # Results gate
@@ -557,291 +536,161 @@ journals = st.session_state["result"]["journals"]
 st.divider()
 
 # --------------------------------------------------------------------------- #
-# Top Journals  +  Detail panel
+# Paper Profile (persistent left panel)  +  Journals & Detail (right)
 # --------------------------------------------------------------------------- #
-left, right = st.columns([5, 6], gap="large")
+left, right = st.columns([1.6, 7.4], gap="large")
 
 with left:
-    st.markdown("<div class='section-title' style='font-size:1.35rem;'>🏆 Top Recommended Journals</div>",
-                unsafe_allow_html=True)
-    show_all = st.session_state["show_all"]
-    limit    = len(journals) if show_all else min(3, len(journals))
-
-    for idx in range(limit):
-        j     = journals[idx]
-        sel   = (idx == st.session_state["selected_idx"])
-        color = RANK_COLORS[idx % len(RANK_COLORS)]
-        score = j["Rerank"]["final_fit_score"]
-        match = j["Match_Level"]
-        bc    = "badge-high" if match == "High Match" else ("badge-med" if match == "Medium Match" else "badge-low")
-
-        st.markdown(
-            f"<div class='jcard{'  active' if sel else ''}'>"
-            f"<div style='display:flex;gap:.75rem;align-items:flex-start;'>"
-            f"<div style='padding-top:.2rem;flex-shrink:0;'>"
-            f"<span class='rank-circle' style='background:{color};'>{idx+1}</span></div>"
-            f"<div style='flex:1;min-width:0;'>"
-            f"<div style='font-weight:700;font-size:.92rem;color:#111827;margin-bottom:.15rem;"
-            f"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{j['Name']}</div>"
-            f"<div><span class='muted'>Fit score&nbsp;</span>"
-            f"<span class='fit-num'>{int(round(score))}</span>"
-            f"<span class='fit-den'>/100</span></div></div>"
-            f"<div style='text-align:right;flex-shrink:0;padding-top:.1rem;'>"
-            f"{badge(match, bc)}<br>"
-            f"<span class='stars'>{stars_from_score(score)}</span><br>"
-            f"<span class='muted'>Best Quartile: {j.get('Best_Quartile', 'N/A')}</span></div>"
-            f"</div></div>",
-            unsafe_allow_html=True,
-        )
-
-        b1, b2 = st.columns(2)
-        with b1:
-            if st.button("📄 Info", key=f"info_{idx}", use_container_width=True):
-                st.session_state["selected_idx"] = idx
-                st.session_state["right_view"]   = "information"
-                st.rerun()
-        with b2:
-            if st.button("💬 Explain", key=f"expl_{idx}", use_container_width=True):
-                st.session_state["selected_idx"] = idx
-                st.session_state["right_view"]   = "explanation"
-                st.rerun()
-
-    remaining = len(journals) - 3
-    if remaining > 0:
-        lbl = "Show fewer ▲" if show_all else f"Show {remaining} more ▾"
-        if st.button(lbl, key="toggle_all", use_container_width=True):
-            st.session_state["show_all"] = not show_all
-            st.rerun()
+    with st.container(border=True, key="paper_profile_card"):
+        st.markdown("<div class='cov-card-title'>👤 Paper Profile</div>", unsafe_allow_html=True)
+        st.markdown("<div class='label'>Scientific Domains</div>", unsafe_allow_html=True)
+        render_checklist(paper["paper_profile"]["scientific_domains"], "pp_sci_exp", limit=8)
+        st.markdown("<hr style='margin:1rem 0 .8rem;border-color:#e2e8f0;'>", unsafe_allow_html=True)
+        st.markdown("<div class='label'>Research Focuses</div>", unsafe_allow_html=True)
+        render_checklist(paper["paper_profile"]["research_focuses"], "pp_res_exp", limit=5)
 
 with right:
-    sj         = journals[st.session_state["selected_idx"]]
-    name_short = sj["Name"][:44] + ("…" if len(sj["Name"]) > 44 else "")
-    match      = sj["Match_Level"]
-    bc         = "badge-high" if match == "High Match" else ("badge-med" if match == "Medium Match" else "badge-low")
-    view       = st.session_state["right_view"]
+    st.markdown("<div class='section-title' style='font-size:1.55rem;'>🏆 Top Recommended Journals</div>",
+                unsafe_allow_html=True)
 
+    with st.container(height=460):
+        for idx in range(len(journals)):
+            j     = journals[idx]
+            sel   = (idx == st.session_state["selected_idx"])
+            color = RANK_COLORS[idx % len(RANK_COLORS)]
+            score = j["Rerank"]["final_fit_score"]
+            match = j["Match_Level"]
+            bc    = "badge-high" if match == "High Match" else ("badge-med" if match == "Medium Match" else "badge-low")
+
+            if sel:
+                st.markdown(
+                    f"<style>div.st-key-jrow_{idx}{{border:2px solid {color} !important;"
+                    f"background:{color}0D !important;border-radius:12px !important;}}</style>",
+                    unsafe_allow_html=True,
+                )
+
+            with st.container(border=sel, key=f"jrow_{idx}"):
+                row_c = st.columns([0.5, 3.1, 1.6, 1.3, 1.6, 0.9])
+                with row_c[0]:
+                    st.markdown(f"<span class='rank-circle' style='background:{color};margin-top:.5rem;'>{idx+1}</span>",
+                                unsafe_allow_html=True)
+                with row_c[1]:
+                    st.markdown(
+                        f"<div style='font-weight:700;font-size:1.15rem;color:#111827;overflow:hidden;"
+                        f"text-overflow:ellipsis;white-space:nowrap;'>{j['Name']}</div>"
+                        f"<div><span class='muted'>Fit Score:&nbsp;</span>"
+                        f"<span class='fit-num'>{int(round(score))}</span>"
+                        f"<span class='fit-den'>/100</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                with row_c[2]:
+                    st.markdown(f"<div style='margin-top:.6rem;'>{badge(match, bc)}</div>", unsafe_allow_html=True)
+                with row_c[3]:
+                    st.markdown(f"<div class='stars' style='margin-top:.55rem;'>{stars_from_score(score)}</div>",
+                                unsafe_allow_html=True)
+                with row_c[4]:
+                    st.markdown(f"<div style='margin-top:.65rem;font-size:1.05rem;color:#6b7280;"
+                                f"white-space:nowrap;'>Best Quartile: {j.get('Best_Quartile', 'N/A')}</div>",
+                                unsafe_allow_html=True)
+                with row_c[5]:
+                    if st.button("View →", key=f"select_{idx}", use_container_width=True):
+                        st.session_state["selected_idx"] = idx
+                        st.rerun()
+            st.markdown("<hr style='margin:.3rem 0;border-color:#f1f5f9;'>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:1.4rem;'></div>", unsafe_allow_html=True)
+
+    # ----------------------------------------------------------------- #
+    # Selected Journal Detail
+    # ----------------------------------------------------------------- #
+    sj    = journals[st.session_state["selected_idx"]]
+    score = sj["Rerank"]["final_fit_score"]
+    match = sj["Match_Level"]
+    bc    = "badge-high" if match == "High Match" else ("badge-med" if match == "Medium Match" else "badge-low")
+    color = RANK_COLORS[st.session_state["selected_idx"] % len(RANK_COLORS)]
+
+    st.markdown(f"<div class='section-title'>Selected Journal Detail — {sj['Name']}</div>",
+                unsafe_allow_html=True)
     st.markdown(
-        f"<div style='margin-bottom:.55rem;'>"
-        f"<div class='section-title'>{name_short}"
-        f"<span class='pill-id'>#{sj['Rerank']['new_rank']}</span></div>"
-        f"<div>{badge(match, bc)}&nbsp;"
-        f"<span class='muted'>Score: {sj['Rerank']['final_fit_score']:.1f}/100"
-        f"&nbsp;·&nbsp;Best Quartile: {sj.get('Best_Quartile', 'N/A')}</span></div></div>",
+        f"<style>div.st-key-detail_card{{border:2px solid {color} !important;"
+        f"box-shadow:0 4px 14px {color}22 !important;border-radius:14px !important;}}</style>",
         unsafe_allow_html=True,
     )
 
-    if view == "information":
-        st.markdown("**Aims & Scope**")
-        _aims_words = sj["Aims"].split()
-        _aims_key   = f"aims_exp_{st.session_state['selected_idx']}"
-        if _aims_key not in st.session_state:
-            st.session_state[_aims_key] = False
-        if len(_aims_words) <= 50 or st.session_state[_aims_key]:
-            st.write(sj["Aims"])
-            if len(_aims_words) > 50:
-                if st.button("See less ▲", key=f"aims_btn_{st.session_state['selected_idx']}"):
-                    st.session_state[_aims_key] = False
-                    st.rerun()
-        else:
-            st.write(" ".join(_aims_words[:50]) + "…")
-            if st.button("See more ▾", key=f"aims_btn_{st.session_state['selected_idx']}"):
-                st.session_state[_aims_key] = True
-                st.rerun()
-        ci1, ci2 = st.columns(2)
-        _INFO_LIMIT = 5
-        with ci1:
-            st.markdown("**Categories (Scientific Domains)**")
-            cats        = sj["journal_profile"]["scientific_domains"]
-            _cat_key    = f"cats_exp_{st.session_state['selected_idx']}"
-            _cat_expanded = st.session_state.get(_cat_key, False)
-            for d in (cats if _cat_expanded or len(cats) <= _INFO_LIMIT else cats[:_INFO_LIMIT]):
-                st.markdown(f"- {d}")
-            if len(cats) > _INFO_LIMIT:
-                _lbl = "Show fewer ▲" if _cat_expanded else f"Show {len(cats) - _INFO_LIMIT} more ▾"
-                if st.button(_lbl, key=f"btn_cats_{st.session_state['selected_idx']}", use_container_width=True):
-                    st.session_state[_cat_key] = not _cat_expanded
-                    st.rerun()
-        with ci2:
-            st.markdown("**Research Focuses**")
-            focuses     = sj["journal_profile"]["research_focuses"]
-            _foc_key    = f"foc_exp_{st.session_state['selected_idx']}"
-            _foc_expanded = st.session_state.get(_foc_key, False)
-            for rf in (focuses if _foc_expanded or len(focuses) <= _INFO_LIMIT else focuses[:_INFO_LIMIT]):
-                st.markdown(f"- {rf['name']}")
-            if len(focuses) > _INFO_LIMIT:
-                _lbl = "Show fewer ▲" if _foc_expanded else f"Show {len(focuses) - _INFO_LIMIT} more ▾"
-                if st.button(_lbl, key=f"btn_foc_{st.session_state['selected_idx']}", use_container_width=True):
-                    st.session_state[_foc_key] = not _foc_expanded
-                    st.rerun()
-
-    else:
-        expl = sj["Explanation"]
-        st.info(expl.get("header", ""))
-        st.markdown("**Relevant Scores Explanation**")
-        for s in expl.get("score_breakdown", []):
-            color = _EXPLAIN_SCORE_COLORS.get(s["key"], "#6b7280")
-            width = int(round(min(max(s["value_pct"], 0), 100)))
+    with st.container(border=True, key="detail_card"):
+        th1, th2 = st.columns([0.6, 8])
+        with th1:
+            st.markdown(f"<span class='rank-circle' style='background:{color};width:44px;height:44px;"
+                        f"font-size:1.1rem;margin-top:.1rem;'>{sj['Rerank']['new_rank']}</span>",
+                        unsafe_allow_html=True)
+        with th2:
             st.markdown(
-                f"<div style='margin:.5rem 0;padding:.55rem .7rem;border-radius:8px;"
-                f"border:1px solid {color}33;border-left:4px solid {color};background:{color}0D;'>"
-                f"<div style='display:flex;align-items:center;gap:.6rem;'>"
-                f"<span style='flex:1 1 auto;font-weight:700;font-size:.92rem;color:{color};'>{s['label']}</span>"
-                f"<div class='bar-track' style='flex:0 0 90px;'>"
-                f"<div class='bar-fill' style='width:{width}%;background:{color};'></div></div>"
-                f"<span style='flex:0 0 40px;text-align:right;font-weight:700;font-size:.83rem;color:{color};'>{s['value_pct']}%</span>"
-                f"</div>"
-                f"<div style='font-size:.8rem;color:#4b5563;margin-top:.3rem;'>{s['explanation']}</div>"
+                f"<div style='display:flex;align-items:center;gap:.7rem;'>"
+                f"<span style='font-weight:700;font-size:1.3rem;color:#111827;'>{sj['Name']}</span>"
+                f"{badge(match, bc)}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:.7rem;margin-top:.4rem;'>"
+                f"<span class='muted' style='font-size:1rem;'>Overall Score:&nbsp;</span>"
+                f"<span class='fit-num' style='font-size:1.5rem;'>{score:.1f}</span>"
+                f"<span class='fit-den'>/100</span>"
+                f"<span style='color:#d1d5db;font-size:1.3rem;'>|</span>"
+                f"<span class='stars' style='font-size:1.6rem;'>{stars_from_score(score)}</span>"
+                f"<span style='font-size:1.05rem;color:#6b7280;'>Best Quartile: "
+                f"<b style='color:#111827;'>{sj.get('Best_Quartile', 'N/A')}</b></span>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
-        st.markdown("**Recommendation signals**")
-        for w in sj["why_recommended"]:
-            st.markdown(f"<div class='check-row'><span class='check'>✔</span>{w}</div>",
-                        unsafe_allow_html=True)
 
-st.divider()
+        st.markdown("<hr style='margin:1.1rem 0;border-color:#e2e8f0;'>", unsafe_allow_html=True)
 
-# --------------------------------------------------------------------------- #
-# Coverage Analysis
-# --------------------------------------------------------------------------- #
-sj = journals[st.session_state["selected_idx"]]
-st.markdown("<div class='section-title'>📊 Coverage Analysis</div>", unsafe_allow_html=True)
-cv1, cv2, cv3 = st.columns(3)
+        left_col, right_col = st.columns([2, 1.3], gap="medium")
 
-_RES_LIMIT = 5
+        with left_col:
+            d1, d2 = st.columns(2, gap="medium")
+            with d1, st.container(border=True, key="detail_aims", height=300):
+                st.markdown("<div class='label'>🔬 Aims & Scope</div>", unsafe_allow_html=True)
+                _aims_words = sj["Aims"].split()
+                _aims_key   = f"aims_exp_{st.session_state['selected_idx']}"
+                if len(_aims_words) <= 50 or st.session_state.get(_aims_key, False):
+                    st.markdown(f"<span style='font-size:.85rem;color:#374151;'>{sj['Aims']}</span>",
+                                unsafe_allow_html=True)
+                    if len(_aims_words) > 50:
+                        if st.button("See less ▲", key=f"aims_btn_{st.session_state['selected_idx']}"):
+                            st.session_state[_aims_key] = False
+                            st.rerun()
+                else:
+                    st.markdown(f"<span style='font-size:.85rem;color:#374151;'>"
+                                f"{' '.join(_aims_words[:50])}…</span>", unsafe_allow_html=True)
+                    if st.button("See more ▾", key=f"aims_btn_{st.session_state['selected_idx']}"):
+                        st.session_state[_aims_key] = True
+                        st.rerun()
+            with d2, st.container(border=True, key="detail_cats", height=300):
+                st.markdown("<div class='label'>🏷️ Categories </div>", unsafe_allow_html=True)
+                render_checklist(sj.get("Categories", []), f"det_cats_{st.session_state['selected_idx']}", limit=5)
 
-with cv1:
-    p_res     = paper["paper_profile"]["research_focuses"]
-    _pk       = "cov_paper_res_exp"
-    _p_expanded = st.session_state.get(_pk, False)
-    rows_sci  = "".join(
-        f"<div class='check-row'><span class='check'>✔</span>{d}</div>"
-        for d in paper["paper_profile"]["scientific_domains"]
-    )
-    rows_res  = "".join(
-        f"<div class='check-row'><span class='check'>✔</span>{r}</div>"
-        for r in (p_res if _p_expanded or len(p_res) <= _RES_LIMIT else p_res[:_RES_LIMIT])
-    )
-    st.markdown(
-        f"<div class='cov-card'>"
-        f"<div class='cov-card-title'>Paper Profile</div>"
-        f"<div class='label'>Scientific Domains</div>{rows_sci}"
-        f"<div class='label' style='margin-top:.8rem;'>Research Focuses</div>{rows_res}"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-    if len(p_res) > _RES_LIMIT:
-        _lbl = "Show fewer ▲" if _p_expanded else f"Show {len(p_res) - _RES_LIMIT} more ▾"
-        if st.button(_lbl, key="btn_paper_res", use_container_width=True):
-            st.session_state[_pk] = not _p_expanded
-            st.rerun()
+            st.markdown(
+                f"<div class='reasoning-box' style='margin-top:1rem;height:168px;"
+                f"overflow-y:auto;box-sizing:border-box;'>"
+                f"<div class='reasoning-title'>🧠 Main Reasoning</div>"
+                f"{sj['Explanation'].get('header', '')}</div>",
+                unsafe_allow_html=True,
+            )
 
-with cv2:
-    j_res        = sj["journal_profile"]["research_focuses"]
-    _jk          = f"cov_j_res_exp_{st.session_state['selected_idx']}"
-    _j_expanded  = st.session_state.get(_jk, False)
-    j_name_short = sj["Name"][:28] + ("…" if len(sj["Name"]) > 28 else "")
-    rows_sci_j   = "".join(
-        f"<div class='check-row'><span class='check'>✔</span>{d}</div>"
-        for d in sj["journal_profile"]["scientific_domains"]
-    )
-    rows_res_j   = "".join(
-        f"<div class='check-row'><span class='check'>✔</span>{rf['name']}</div>"
-        for rf in (j_res if _j_expanded or len(j_res) <= _RES_LIMIT else j_res[:_RES_LIMIT])
-    )
-    st.markdown(
-        f"<div class='cov-card'>"
-        f"<div class='cov-card-title'>Journal Profile "
-        f"<span style='font-weight:500;color:#6b7280;font-size:.8rem;'>({j_name_short})</span></div>"
-        f"<div class='label'>Scientific Domains</div>{rows_sci_j}"
-        f"<div class='label' style='margin-top:.8rem;'>Research Focuses</div>{rows_res_j}"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-    if len(j_res) > _RES_LIMIT:
-        _lbl = "Show fewer ▲" if _j_expanded else f"Show {len(j_res) - _RES_LIMIT} more ▾"
-        if st.button(_lbl, key=f"btn_j_res_{st.session_state['selected_idx']}", use_container_width=True):
-            st.session_state[_jk] = not _j_expanded
-            st.rerun()
-
-with cv3:
-    m = sj["coverage_metrics"]
-    def _bar(pct_val, color):
-        return (
-            f"<div class='cov-bar-row'>"
-            f"<div class='bar-track'>"
-            f"<div class='bar-fill' style='background:{color};width:{pct_val}%;'></div>"
-            f"</div>"
-            f"<span style='font-weight:700;color:{color};font-size:.82rem;flex-shrink:0;'>"
-            f"{pct_val}%</span></div>"
-        )
-    _rows = [
-        ("Aims / Scope Similarity",        min(sj["Aims_Scope_Sim"], 1.0),                              "#2563eb"),
-        ("Domain ↔ Category",              m["Scientific_domain_profile_category_alignment"],           "#14b8a6"),
-        ("Domain ↔ Aims/Scope",            m["Scientific_domain_profile_AimScope_alignment"],            "#8b5cf6"),
-        ("Abstract ↔ Category",            m["abstract_category_alignment"],                             "#ec4899"),
-        ("Research Focus ↔ Aims/Scope",    m["research_focuses_profile_aimscope_alignment"],             "#6366f1"),
-        ("Research Focus ↔ Category",      m["research_focuses_profile_category_alignment"],             "#22c55e"),
-    ]
-    _body = "".join(
-        f"<div class='label'>{label}</div>{_bar(round(min(max(val, 0.0), 1.0) * 100), color)}"
-        for label, val, color in _rows
-    )
-    st.markdown(
-        f"<div class='cov-card'>"
-        f"<div class='cov-card-title'>Coverage Summary</div>"
-        f"{_body}"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-st.divider()
-
-# --------------------------------------------------------------------------- #
-# Feature Contribution  +  Risk & Weakness  (2 columns)
-# --------------------------------------------------------------------------- #
-sj = journals[st.session_state["selected_idx"]]
-bot1, bot2 = st.columns([3, 2], gap="large")
-
-with bot1:
-    st.markdown("<div class='section-title'>📈 Feature Contribution</div>", unsafe_allow_html=True)
-    st.caption(f"Top {_TOP_CONTRIBUTORS} features driving this journal's Fit Score, by share of "
-               "the trained model's decision. Sign shows whether it pushed the score up or down.")
-
-    for f in sj["feature_contribution"]:
-        width = int(round(min(abs(f["share_pct"]), 100.0)))
-        sign  = "+" if f["positive"] else "−"
-        st.markdown(
-            f"<div class='feat-row'>"
-            f"<span class='feat-lbl'>{f['feature']}</span>"
-            f"<div class='bar-track'>"
-            f"<div class='bar-fill' style='width:{width}%;background:{f['color']};'></div></div>"
-            f"<span class='feat-val' style='color:{f['color']};'>{sign}{abs(f['share_pct']):.1f}%</span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-    st.divider()
-    st.metric("Final Fit Score", f"{sj['Rerank']['final_fit_score']:.1f} / 100")
-
-with bot2:
-    st.markdown("<div class='section-title'>🛡️ Risk & Weakness</div>", unsafe_allow_html=True)
-    ra = sj["risk_analysis"]
-    s_html = "".join(
-        f"<div class='check-row'><span class='check'>✔</span>{s}</div>"
-        for s in ra["strengths"]
-    )
-    st.markdown(
-        f"<div class='strengths-box'>"
-        f"<div class='box-title' style='color:#16a34a;'>✅ Strengths</div>{s_html}</div>",
-        unsafe_allow_html=True,
-    )
-    r_html = "".join(
-        f"<div class='check-row'><span class='warn'>⚠</span>{r}</div>"
-        for r in ra["risks"]
-    )
-    st.markdown(
-        f"<div class='risks-box'>"
-        f"<div class='box-title' style='color:#d97706;'>⚠️ Potential Risks</div>{r_html}</div>",
-        unsafe_allow_html=True,
-    )
+        with right_col, st.container(border=True, key="detail_scores", height=500):
+            st.markdown("<div class='label'>🌟 Score Explanation</div>", unsafe_allow_html=True)
+            for g in select_score_explanation(sj):
+                gcolor = _SCORE_COLORS[g["key"]]
+                icon   = g["icon"]
+                st.markdown(
+                    f"<div style='margin:1rem 0;'>"
+                    f"<div style='display:flex;justify-content:space-between;font-size:.95rem;'>"
+                    f"<span style='font-weight:600;color:#111827;'>{icon} {g['label']}</span>"
+                    f"<span style='font-weight:700;color:{gcolor};'>{g['pct']}%</span></div>"
+                    f"<div class='bar-track' style='margin-top:.4rem;height:10px;'>"
+                    f"<div class='bar-fill' style='width:{max(min(g['pct'],100),0)}%;background:{gcolor};height:10px;'></div></div>"
+                    f"<div style='margin-top:.3rem;font-size:.85rem;color:#6b7280;'>{g['desc']}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
