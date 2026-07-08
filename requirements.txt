@@ -1,9 +1,19 @@
-torch>=2.0.0
-transformers>=4.35.0
-sentence-transformers>=2.2.2
+# Web UI
+streamlit>=1.50.0
+
+# Deep learning / HuggingFace stack
+torch>=2.4.0
+transformers>=4.45.0
+sentence-transformers>=3.0.0
 accelerate>=0.27.0
+
+# Data handling
 pandas>=2.0.0
 numpy>=1.24.0
-anthropic>=0.111.0
 tqdm>=4.65.0
-torchvision>=0.17.0
+
+# NOTE: the checked-in venv on this machine uses CUDA-enabled wheels
+# (torch==2.11.0+cu128). `pip install -r requirements.txt` alone installs
+# the CPU-only build. For GPU support, install torch/torchvision/torchaudio
+# separately first from https://pytorch.org/get-started/locally/ before
+# running `pip install -r requirements.txt`.

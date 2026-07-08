@@ -2,13 +2,26 @@
 venv/
 .venv/
 
-# Model weights (too large for GitHub)
+# Model weights & large intermediate data (too large for GitHub)
+# Keep data/journal_category.csv and data/journal_extract.json tracked —
+# the app reads them directly. Everything else under data/ is bulk
+# training/experiment data and stays ignored.
+data/*/
 data/*.pth
 data/*.bin
 data/*.safetensors
-data/
-models/
+data/journal_full_info.csv
+
+# Keep models/student_model.json tracked (small, required by the app).
+# The classifier checkpoint is too large for GitHub — obtain it separately
+# and place it at models/Epoch_02_SIMCPRS_dmis-lab_biobert-v1_1_CL.pth
+models/*.pth
+models/*.bin
+models/*.safetensors
+models/*.json
+
 outputs/
+
 # Python cache
 __pycache__/
 *.pyc

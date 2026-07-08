@@ -332,9 +332,8 @@ st.markdown("""
     box-shadow:0 4px 12px rgba(79,70,229,.5) !important;transform:translateY(-1px);
   }
 
-  div.st-key-pi_title, div.st-key-pi_abstract, div.st-key-pi_keywords{
-    background:#fff !important;min-height:210px;
-  }
+  div.st-key-pi_title{background:#fff !important;min-height:90px;}
+  div.st-key-pi_abstract, div.st-key-pi_keywords{background:#fff !important;min-height:210px;}
 
   div.st-key-paper_profile_card .cov-card-title{font-size:1.2rem;}
   div.st-key-paper_profile_card .label{font-size:.9rem;}
@@ -424,7 +423,7 @@ st.markdown(
     "<div style='font-size:1.2rem;font-weight:900;color:#2563eb;letter-spacing:.02em;line-height:1.6;padding:.1rem 0;'>MedPRS</div>"
     "<div style='font-size:.72rem;color:#6b7280;font-weight:400;line-height:1.5;'>Research Assistant</div>"
     "</div>"
-    "<div style='font-size:1.4rem;font-weight:700;color:#111827;line-height:1.6;padding:.1rem 0;'>Journal Recommendation System</div>"
+    "<div style='font-size:1.9rem;font-weight:700;color:#111827;line-height:1.6;padding:.1rem 0;'>Medical Journal Submission Recommendation System</div>"
     "</div>",
     unsafe_allow_html=True,
 )
@@ -462,25 +461,14 @@ def _add_keyword():
 
 models_ready = "_models" in st.session_state
 
-hdr_l, hdr_r = st.columns([5, 1])
-with hdr_l:
-    st.markdown("<div class='section-title' style='font-size:1.55rem;'>📘 Paper Input</div>", unsafe_allow_html=True)
-with hdr_r:
-    submitted = st.button(
-        "⭐ Recommend Journals",
-        type="primary",
-        use_container_width=True,
-        disabled=not models_ready,
-        help="Load models from the sidebar first" if not models_ready else
-             "Run the pipeline and save results to outputs/result.json",
-    )
+st.markdown("<div class='section-title' style='font-size:1.55rem;'>📘 Paper Input</div>", unsafe_allow_html=True)
 
-fc1, fc2, fc3 = st.columns([2, 3, 2.2], gap="medium")
-with fc1:
-    with st.container(border=True, key="pi_title"):
-        st.markdown("**Title**")
-        st.text_input("Title", key="title_in", placeholder="Enter paper title…",
-                      label_visibility="collapsed")
+with st.container(border=True, key="pi_title"):
+    st.markdown("**Title**")
+    st.text_input("Title", key="title_in", placeholder="Enter paper title…",
+                  label_visibility="collapsed")
+
+fc2, fc3 = st.columns([3, 2.2], gap="medium")
 with fc2:
     with st.container(border=True, key="pi_abstract"):
         st.markdown("**Abstract**")
@@ -500,6 +488,18 @@ with fc3:
         st.text_input("Add keyword", key="kw_add_input",
                       placeholder="Add keyword and press Enter…",
                       label_visibility="collapsed", on_change=_add_keyword)
+
+_, btn_col = st.columns([4, 1.3])
+with btn_col:
+    submitted = st.button(
+        "⭐ Recommend Journals",
+        key="recommend_btn",
+        type="primary",
+        use_container_width=True,
+        disabled=not models_ready,
+        help="Load models from the sidebar first" if not models_ready else
+             "Run the pipeline and save results to outputs/result.json",
+    )
 
 if submitted:
     title_in    = st.session_state["title_in"]
@@ -600,97 +600,97 @@ with right:
 
     st.markdown("<div style='height:1.4rem;'></div>", unsafe_allow_html=True)
 
-    # ----------------------------------------------------------------- #
-    # Selected Journal Detail
-    # ----------------------------------------------------------------- #
-    sj    = journals[st.session_state["selected_idx"]]
-    score = sj["Rerank"]["final_fit_score"]
-    match = sj["Match_Level"]
-    bc    = "badge-high" if match == "High Match" else ("badge-med" if match == "Medium Match" else "badge-low")
-    color = RANK_COLORS[st.session_state["selected_idx"] % len(RANK_COLORS)]
+# --------------------------------------------------------------------------- #
+# Selected Journal Detail  (full page width, spans under Paper Profile too)
+# --------------------------------------------------------------------------- #
+sj    = journals[st.session_state["selected_idx"]]
+score = sj["Rerank"]["final_fit_score"]
+match = sj["Match_Level"]
+bc    = "badge-high" if match == "High Match" else ("badge-med" if match == "Medium Match" else "badge-low")
+color = RANK_COLORS[st.session_state["selected_idx"] % len(RANK_COLORS)]
 
-    st.markdown(f"<div class='section-title'>Selected Journal Detail — {sj['Name']}</div>",
-                unsafe_allow_html=True)
-    st.markdown(
-        f"<style>div.st-key-detail_card{{border:2px solid {color} !important;"
-        f"box-shadow:0 4px 14px {color}22 !important;border-radius:14px !important;}}</style>",
-        unsafe_allow_html=True,
-    )
+st.markdown(f"<div class='section-title'>Selected Journal Detail — {sj['Name']}</div>",
+            unsafe_allow_html=True)
+st.markdown(
+    f"<style>div.st-key-detail_card{{border:2px solid {color} !important;"
+    f"box-shadow:0 4px 14px {color}22 !important;border-radius:14px !important;}}</style>",
+    unsafe_allow_html=True,
+)
 
-    with st.container(border=True, key="detail_card"):
-        th1, th2 = st.columns([0.6, 8])
-        with th1:
-            st.markdown(f"<span class='rank-circle' style='background:{color};width:44px;height:44px;"
-                        f"font-size:1.1rem;margin-top:.1rem;'>{sj['Rerank']['new_rank']}</span>",
-                        unsafe_allow_html=True)
-        with th2:
+with st.container(border=True, key="detail_card"):
+    th1, th2 = st.columns([0.6, 8])
+    with th1:
+        st.markdown(f"<span class='rank-circle' style='background:{color};width:44px;height:44px;"
+                    f"font-size:1.1rem;margin-top:.1rem;'>{sj['Rerank']['new_rank']}</span>",
+                    unsafe_allow_html=True)
+    with th2:
+        st.markdown(
+            f"<div style='display:flex;align-items:center;gap:.7rem;'>"
+            f"<span style='font-weight:700;font-size:1.3rem;color:#111827;'>{sj['Name']}</span>"
+            f"{badge(match, bc)}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='display:flex;align-items:center;gap:.7rem;margin-top:.4rem;'>"
+            f"<span class='muted' style='font-size:1rem;'>Overall Score:&nbsp;</span>"
+            f"<span class='fit-num' style='font-size:1.5rem;'>{score:.1f}</span>"
+            f"<span class='fit-den'>/100</span>"
+            f"<span style='color:#d1d5db;font-size:1.3rem;'>|</span>"
+            f"<span class='stars' style='font-size:1.6rem;'>{stars_from_score(score)}</span>"
+            f"<span style='font-size:1.05rem;color:#6b7280;'>Best Quartile: "
+            f"<b style='color:#111827;'>{sj.get('Best_Quartile', 'N/A')}</b></span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<hr style='margin:1.1rem 0;border-color:#e2e8f0;'>", unsafe_allow_html=True)
+
+    left_col, right_col = st.columns([2, 1.3], gap="medium")
+
+    with left_col:
+        d1, d2 = st.columns(2, gap="medium")
+        with d1, st.container(border=True, key="detail_aims", height=300):
+            st.markdown("<div class='label'>🔬 Aims & Scope</div>", unsafe_allow_html=True)
+            _aims_words = sj["Aims"].split()
+            _aims_key   = f"aims_exp_{st.session_state['selected_idx']}"
+            if len(_aims_words) <= 50 or st.session_state.get(_aims_key, False):
+                st.markdown(f"<span style='font-size:.85rem;color:#374151;'>{sj['Aims']}</span>",
+                            unsafe_allow_html=True)
+                if len(_aims_words) > 50:
+                    if st.button("See less ▲", key=f"aims_btn_{st.session_state['selected_idx']}"):
+                        st.session_state[_aims_key] = False
+                        st.rerun()
+            else:
+                st.markdown(f"<span style='font-size:.85rem;color:#374151;'>"
+                            f"{' '.join(_aims_words[:50])}…</span>", unsafe_allow_html=True)
+                if st.button("See more ▾", key=f"aims_btn_{st.session_state['selected_idx']}"):
+                    st.session_state[_aims_key] = True
+                    st.rerun()
+        with d2, st.container(border=True, key="detail_cats", height=300):
+            st.markdown("<div class='label'>🏷️ Categories </div>", unsafe_allow_html=True)
+            render_checklist(sj.get("Categories", []), f"det_cats_{st.session_state['selected_idx']}", limit=5)
+
+        st.markdown(
+            f"<div class='reasoning-box' style='margin-top:1rem;height:168px;"
+            f"overflow-y:auto;box-sizing:border-box;'>"
+            f"<div class='reasoning-title'>🧠 Main Reasoning</div>"
+            f"{sj['Explanation'].get('header', '')}</div>",
+            unsafe_allow_html=True,
+        )
+
+    with right_col, st.container(border=True, key="detail_scores", height=500):
+        st.markdown("<div class='label'>🌟 Score Explanation</div>", unsafe_allow_html=True)
+        for g in select_score_explanation(sj):
+            gcolor = _SCORE_COLORS[g["key"]]
+            icon   = g["icon"]
             st.markdown(
-                f"<div style='display:flex;align-items:center;gap:.7rem;'>"
-                f"<span style='font-weight:700;font-size:1.3rem;color:#111827;'>{sj['Name']}</span>"
-                f"{badge(match, bc)}</div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f"<div style='display:flex;align-items:center;gap:.7rem;margin-top:.4rem;'>"
-                f"<span class='muted' style='font-size:1rem;'>Overall Score:&nbsp;</span>"
-                f"<span class='fit-num' style='font-size:1.5rem;'>{score:.1f}</span>"
-                f"<span class='fit-den'>/100</span>"
-                f"<span style='color:#d1d5db;font-size:1.3rem;'>|</span>"
-                f"<span class='stars' style='font-size:1.6rem;'>{stars_from_score(score)}</span>"
-                f"<span style='font-size:1.05rem;color:#6b7280;'>Best Quartile: "
-                f"<b style='color:#111827;'>{sj.get('Best_Quartile', 'N/A')}</b></span>"
+                f"<div style='margin:1rem 0;'>"
+                f"<div style='display:flex;justify-content:space-between;font-size:.95rem;'>"
+                f"<span style='font-weight:600;color:#111827;'>{icon} {g['label']}</span>"
+                f"<span style='font-weight:700;color:{gcolor};'>{g['pct']}%</span></div>"
+                f"<div class='bar-track' style='margin-top:.4rem;height:10px;'>"
+                f"<div class='bar-fill' style='width:{max(min(g['pct'],100),0)}%;background:{gcolor};height:10px;'></div></div>"
+                f"<div style='margin-top:.3rem;font-size:.85rem;color:#6b7280;'>{g['desc']}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
-
-        st.markdown("<hr style='margin:1.1rem 0;border-color:#e2e8f0;'>", unsafe_allow_html=True)
-
-        left_col, right_col = st.columns([2, 1.3], gap="medium")
-
-        with left_col:
-            d1, d2 = st.columns(2, gap="medium")
-            with d1, st.container(border=True, key="detail_aims", height=300):
-                st.markdown("<div class='label'>🔬 Aims & Scope</div>", unsafe_allow_html=True)
-                _aims_words = sj["Aims"].split()
-                _aims_key   = f"aims_exp_{st.session_state['selected_idx']}"
-                if len(_aims_words) <= 50 or st.session_state.get(_aims_key, False):
-                    st.markdown(f"<span style='font-size:.85rem;color:#374151;'>{sj['Aims']}</span>",
-                                unsafe_allow_html=True)
-                    if len(_aims_words) > 50:
-                        if st.button("See less ▲", key=f"aims_btn_{st.session_state['selected_idx']}"):
-                            st.session_state[_aims_key] = False
-                            st.rerun()
-                else:
-                    st.markdown(f"<span style='font-size:.85rem;color:#374151;'>"
-                                f"{' '.join(_aims_words[:50])}…</span>", unsafe_allow_html=True)
-                    if st.button("See more ▾", key=f"aims_btn_{st.session_state['selected_idx']}"):
-                        st.session_state[_aims_key] = True
-                        st.rerun()
-            with d2, st.container(border=True, key="detail_cats", height=300):
-                st.markdown("<div class='label'>🏷️ Categories </div>", unsafe_allow_html=True)
-                render_checklist(sj.get("Categories", []), f"det_cats_{st.session_state['selected_idx']}", limit=5)
-
-            st.markdown(
-                f"<div class='reasoning-box' style='margin-top:1rem;height:168px;"
-                f"overflow-y:auto;box-sizing:border-box;'>"
-                f"<div class='reasoning-title'>🧠 Main Reasoning</div>"
-                f"{sj['Explanation'].get('header', '')}</div>",
-                unsafe_allow_html=True,
-            )
-
-        with right_col, st.container(border=True, key="detail_scores", height=500):
-            st.markdown("<div class='label'>🌟 Score Explanation</div>", unsafe_allow_html=True)
-            for g in select_score_explanation(sj):
-                gcolor = _SCORE_COLORS[g["key"]]
-                icon   = g["icon"]
-                st.markdown(
-                    f"<div style='margin:1rem 0;'>"
-                    f"<div style='display:flex;justify-content:space-between;font-size:.95rem;'>"
-                    f"<span style='font-weight:600;color:#111827;'>{icon} {g['label']}</span>"
-                    f"<span style='font-weight:700;color:{gcolor};'>{g['pct']}%</span></div>"
-                    f"<div class='bar-track' style='margin-top:.4rem;height:10px;'>"
-                    f"<div class='bar-fill' style='width:{max(min(g['pct'],100),0)}%;background:{gcolor};height:10px;'></div></div>"
-                    f"<div style='margin-top:.3rem;font-size:.85rem;color:#6b7280;'>{g['desc']}</div>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
